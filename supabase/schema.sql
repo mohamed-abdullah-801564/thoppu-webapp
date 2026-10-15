@@ -98,7 +98,7 @@ VALUES ('00000000-0000-0000-0000-000000000001', 27686.00)
 ON CONFLICT (property_id) DO NOTHING;
 
 -- 7. DATABASE LOCKING TRIGGERS
--- Prevents updating or deleting verified expenses
+-- Protects financial amounts and dates from tampering, while allowing note/category corrections
 CREATE OR REPLACE FUNCTION public.check_expense_lock()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -108,8 +108,9 @@ BEGIN
         END IF;
         RETURN OLD;
     ELSIF TG_OP = 'UPDATE' THEN
-        IF OLD.status = 'Verified' AND NOT (NEW.status = 'Verified' AND OLD.* IS NOT DISTINCT FROM NEW.*) THEN
-            RAISE EXCEPTION 'Locked: Verified expenses cannot be edited.';
+        -- Protect verified amounts and dates from silent alteration; allow note & category corrections
+        IF OLD.status = 'Verified' AND (OLD.amount != NEW.amount OR OLD.date != NEW.date) THEN
+            RAISE EXCEPTION 'Locked: Verified expense amount and date cannot be changed. Enter an adjustment entry instead.';
         END IF;
         NEW.updated_at = now();
         RETURN NEW;
@@ -124,7 +125,7 @@ CREATE TRIGGER tr_expense_lock
     FOR EACH ROW
     EXECUTE FUNCTION public.check_expense_lock();
 
--- Prevents updating or deleting confirmed deposits
+-- Prevents deleting confirmed deposits or altering their amounts/dates; allows editing reference notes
 CREATE OR REPLACE FUNCTION public.check_deposit_lock()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -134,8 +135,8 @@ BEGIN
         END IF;
         RETURN OLD;
     ELSIF TG_OP = 'UPDATE' THEN
-        IF OLD.status = 'Confirmed' AND NOT (NEW.status = 'Confirmed' AND OLD.* IS NOT DISTINCT FROM NEW.*) THEN
-            RAISE EXCEPTION 'Locked: Confirmed deposits cannot be edited.';
+        IF OLD.status = 'Confirmed' AND (OLD.amount != NEW.amount OR OLD.date != NEW.date) THEN
+            RAISE EXCEPTION 'Locked: Confirmed deposit amount and date cannot be changed.';
         END IF;
         NEW.updated_at = now();
         RETURN NEW;

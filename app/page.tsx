@@ -785,6 +785,7 @@ function AccountantView({
             openingBalance={openingBalance}
             lang={lang}
             accountant
+            profile={profile}
             onRefresh={onRefresh}
           />
         )}
@@ -1082,6 +1083,89 @@ function OwnerView({
 // ==============================================================================
 // LEDGER SCREEN (CSV + EXCEL IMPORT / EXPORT)
 // ==============================================================================
+// --- EDIT DEPOSIT PARTICULARS MODAL ---
+function EditDepositModal({
+  deposit,
+  lang,
+  onClose,
+  onSuccess,
+}: {
+  deposit: Deposit
+  lang: Language
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [fromName, setFromName] = useState(deposit.from_name || '')
+  const [reference, setReference] = useState(deposit.reference || '')
+  const [mode, setMode] = useState(deposit.mode)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('deposits')
+        .update({
+          from_name: fromName.trim() || null,
+          reference: reference.trim() || null,
+          mode,
+        })
+        .eq('id', deposit.id)
+
+      if (error) throw error
+      onSuccess()
+    } catch (err: any) {
+      alert(`Error updating deposit: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Edit Deposit Particulars" onClose={onClose}>
+      <form onSubmit={handleSave} className="form-stack">
+        <div className="p-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] mb-1">
+          <p className="text-xs text-muted-foreground">Amount (Protected for audit)</p>
+          <p className="text-xl font-bold text-[#1f5f46] dark:text-[#35b586]">{formatCurrency(Number(deposit.amount))}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Date: {formatDate(deposit.date)}</p>
+        </div>
+
+        <label>
+          <span>Source / Deposit Type</span>
+          <input
+            value={fromName}
+            onChange={(e) => setFromName(e.target.value)}
+            placeholder="e.g. Owner Deposit (Ashok), Coconut Harvest Sale"
+          />
+        </label>
+
+        <label>
+          <span>Mode</span>
+          <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
+            <option value="Cash">Cash</option>
+            <option value="GPay">GPay</option>
+            <option value="Bank">Bank</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Reference / Note</span>
+          <input
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="e.g. Advance for tractor, 2,500 nuts"
+          />
+        </label>
+
+        <button type="submit" disabled={saving} className="primary-button mt-2">
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </form>
+    </Modal>
+  )
+}
+
 function LedgerScreen({
   expenses,
   deposits,
@@ -1089,6 +1173,7 @@ function LedgerScreen({
   openingBalance,
   lang,
   accountant,
+  profile,
   onRefresh,
 }: {
   expenses: Expense[]
@@ -1097,12 +1182,21 @@ function LedgerScreen({
   openingBalance: number
   lang: Language
   accountant?: boolean
+  profile?: Profile
   onRefresh?: () => void
 }) {
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showRecordDeposit, setShowRecordDeposit] = useState(false)
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null)
+  const [selectedDeposit, setSelectedDeposit] = useState<Deposit | null>(null)
+
+  // Pending deposits check
+  const pendingDeposits = useMemo(() => {
+    return deposits.filter((d) => d.status === 'Sent (pending)')
+  }, [deposits])
 
   // Build sorted chronological entries:
   const rows = useMemo(() => {
@@ -1121,10 +1215,13 @@ function LedgerScreen({
     // 1. Confirmed deposits
     for (const d of deposits) {
       if (d.status === 'Confirmed') {
+        const from = d.from_name ? d.from_name : 'Deposit'
+        const ref = d.reference ? ` · ${d.reference}` : ''
+        const particular = `${from}${ref} (${d.mode})`
         items.push({
           id: d.id,
           date: d.date,
-          particular: d.from_name ? `${d.mode} (${d.from_name})` : d.mode,
+          particular,
           expense: 0,
           income: Number(d.amount),
           type: 'deposit',
@@ -1215,13 +1312,61 @@ function LedgerScreen({
   }
 
   return (
-    <div>
+    <div className="pb-8">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">{getTranslation(lang, 'ledger')}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Running farm cash book (matches Excel)</p>
+          <p className="mt-1 text-sm text-muted-foreground">Running farm cash book & bank reconciliation</p>
         </div>
       </div>
+
+      {/* PENDING DEPOSITS ALERT BANNER */}
+      {pendingDeposits.length > 0 && (
+        <div className="mb-4 rounded-2xl bg-[#fff8eb] dark:bg-[#2a2115] border border-[#f5dfb8] dark:border-[#5a4220] p-4 text-xs">
+          <div className="flex items-start gap-2.5">
+            <IndianRupee className="size-5 text-[#b07817] dark:text-[#f3b749] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-[#684405] dark:text-[#f7cb73] text-sm">
+                {pendingDeposits.length} Deposit{pendingDeposits.length > 1 ? 's' : ''} Awaiting Confirmation (₹{pendingDeposits.reduce((s, d) => s + Number(d.amount), 0).toLocaleString('en-IN')})
+              </p>
+              <p className="text-[#8d6215] dark:text-[#d3a95d] mt-0.5 text-[11px]">
+                Deposits remain pending until confirmed by the accountant so they can reflect in the cash book.
+              </p>
+              <div className="mt-2.5 space-y-1.5">
+                {pendingDeposits.map((d) => (
+                  <div
+                    key={d.id}
+                    className="flex items-center justify-between gap-3 p-2 rounded-xl bg-white/90 dark:bg-[#1a150e]/90 border border-[#f5dfb8] dark:border-[#423118]"
+                  >
+                    <div className="truncate">
+                      <span className="font-bold text-[#18221c] dark:text-[#f2f5f3]">
+                        {d.from_name || 'Owner'}
+                      </span>
+                      <span className="text-muted-foreground ml-1.5 text-[11px]">
+                        · {d.mode} {d.reference ? `(${d.reference})` : ''}
+                      </span>
+                      <span className="ml-2 font-bold text-[#1f5f46] dark:text-[#35b586]">
+                        {formatCurrency(Number(d.amount))}
+                      </span>
+                    </div>
+                    {accountant && (
+                      <button
+                        onClick={async () => {
+                          await supabase.from('deposits').update({ status: 'Confirmed' }).eq('id', d.id)
+                          onRefresh?.()
+                        }}
+                        className="primary-button !min-h-[28px] !py-0.5 !px-3 !text-[11px] whitespace-nowrap shadow-sm shrink-0"
+                      >
+                        <Check className="size-3" /> Confirm
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 grid grid-cols-2 gap-2 text-xs">
@@ -1260,7 +1405,7 @@ function LedgerScreen({
         </div>
       </div>
 
-      {/* Export / Import Buttons */}
+      {/* Export / Import & Add Deposit Action Buttons */}
       <div className="mb-4 grid grid-cols-2 gap-2">
         <button onClick={handleDownloadExcel} className="secondary-button text-xs">
           <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
@@ -1271,13 +1416,22 @@ function LedgerScreen({
           {getTranslation(lang, 'downloadCSV')}
         </button>
         {accountant && (
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="primary-button col-span-2 !min-h-[42px] text-xs"
-          >
-            <Upload className="size-4" />
-            {getTranslation(lang, 'importExcel')}
-          </button>
+          <>
+            <button
+              onClick={() => setShowRecordDeposit(true)}
+              className="primary-button !min-h-[40px] text-xs"
+            >
+              <Plus className="size-4" />
+              + Income / Deposit
+            </button>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="secondary-button !min-h-[40px] text-xs border-dashed"
+            >
+              <Upload className="size-4" />
+              {getTranslation(lang, 'importExcel')}
+            </button>
+          </>
         )}
       </div>
 
@@ -1301,7 +1455,21 @@ function LedgerScreen({
         </div>
 
         {rows.slice().reverse().map((r) => (
-          <div key={r.id} className="ledger-row !grid-cols-[56px_1fr_64px_64px_68px] !gap-1">
+          <div
+            key={r.id}
+            onClick={() => {
+              if (!accountant) return
+              if (r.type === 'expense') {
+                const exp = expenses.find((e) => e.id === r.id)
+                if (exp) setSelectedExpense(exp)
+              } else if (r.type === 'deposit') {
+                const dep = deposits.find((d) => d.id === r.id)
+                if (dep) setSelectedDeposit(dep)
+              }
+            }}
+            className={`ledger-row !grid-cols-[56px_1fr_64px_64px_68px] !gap-1 ${accountant ? 'cursor-pointer hover:bg-[#f5f8f5] dark:hover:bg-[#1a251f] transition-colors' : ''}`}
+            title={accountant ? 'Click to inspect or edit details' : undefined}
+          >
             <span className="truncate text-muted-foreground">{formatDate(r.date).slice(0, 5)}</span>
             <span className="truncate font-medium">{r.particular}</span>
             <span className="text-right text-destructive font-semibold">
@@ -1317,6 +1485,7 @@ function LedgerScreen({
         ))}
       </div>
 
+      {/* MODALS */}
       {showImportModal && (
         <ExcelImportModal
           categories={categories}
@@ -1324,6 +1493,45 @@ function LedgerScreen({
           onClose={() => setShowImportModal(false)}
           onSuccess={() => {
             setShowImportModal(false)
+            onRefresh?.()
+          }}
+        />
+      )}
+
+      {showRecordDeposit && profile && (
+        <DepositModal
+          profile={profile}
+          lang={lang}
+          onClose={() => setShowRecordDeposit(false)}
+          onSuccess={() => {
+            setShowRecordDeposit(false)
+            onRefresh?.()
+          }}
+        />
+      )}
+
+      {selectedDeposit && (
+        <EditDepositModal
+          deposit={selectedDeposit}
+          lang={lang}
+          onClose={() => setSelectedDeposit(null)}
+          onSuccess={() => {
+            setSelectedDeposit(null)
+            onRefresh?.()
+          }}
+        />
+      )}
+
+      {selectedExpense && (
+        <ExpenseDetailModal
+          expense={selectedExpense}
+          categories={categories}
+          profile={profile || { id: '', name: 'Accountant', role: 'accountant', username: 'accountant', property_id: DEFAULT_PROPERTY_ID }}
+          lang={lang}
+          accountant={accountant}
+          onClose={() => setSelectedExpense(null)}
+          onUpdated={() => {
+            setSelectedExpense(null)
             onRefresh?.()
           }}
         />
@@ -1714,48 +1922,58 @@ function SettingsView({
   }
 
   return (
-    <>
-      <div className="mb-5">
+    <div className="space-y-4 pb-8">
+      <div className="mb-2">
         <h2 className="text-2xl font-bold tracking-tight">{getTranslation(lang, 'settings')}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Ledger configuration & team</p>
+        <p className="mt-1 text-sm text-muted-foreground">Account, ledger configuration & farm preferences</p>
       </div>
 
-      <div className="settings-card">
-        {/* Profile Card */}
-        <div className="setting-row">
-          <div>
-            <p className="text-sm font-semibold">{getTranslation(lang, 'profile')}</p>
-            <p className="text-xs text-muted-foreground">
-              {profile.name} · <span className="capitalize">{profile.role}</span>
-            </p>
+      {/* CARD 1: ACCOUNT & PREFERENCES (ALL USERS) */}
+      <div className="settings-card !p-4 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#edf0eb] dark:border-[#27372d]">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-full bg-[#1f5f46] text-white font-bold text-base shadow-sm">
+              {profile.name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">{profile.name}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="badge badge-green !text-[10px] capitalize">{profile.role}</span>
+                <span className="text-[11px] text-muted-foreground">@{profile.username}</span>
+              </div>
+            </div>
           </div>
-          <button onClick={() => setEditingName(!editingName)} className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586]">
+          <button
+            onClick={() => setEditingName(!editingName)}
+            className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline"
+          >
             {editingName ? getTranslation(lang, 'cancel') : getTranslation(lang, 'edit')}
           </button>
         </div>
 
         {editingName && (
-          <div className="py-2">
-            <div className="flex gap-2">
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="flex-1 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-sm bg-white dark:bg-[#151e18]"
-              />
-              <button onClick={handleUpdateName} className="primary-button !min-h-[36px] !py-1 !px-3 !text-xs">
-                {getTranslation(lang, 'save')}
-              </button>
-            </div>
+          <div className="p-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] flex gap-2">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Display name"
+              className="flex-1 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-sm bg-white dark:bg-[#151e18]"
+            />
+            <button onClick={handleUpdateName} className="primary-button !min-h-[36px] !py-1 !px-4 !text-xs whitespace-nowrap">
+              {getTranslation(lang, 'save')}
+            </button>
           </div>
         )}
 
-        {/* DARK MODE TOGGLE (EVERYONE) */}
-        <div className="setting-row">
-          <div className="flex items-center gap-2">
-            {theme === 'dark' ? <Moon className="size-4 text-[#35b586]" /> : <Sun className="size-4 text-[#d7a33f]" />}
+        {/* Theme Switcher */}
+        <div className="flex items-center justify-between py-1">
+          <div className="flex items-center gap-2.5">
+            <div className="grid size-8 place-items-center rounded-lg bg-[#f3f6f2] dark:bg-[#1a251f]">
+              {theme === 'dark' ? <Moon className="size-4 text-[#35b586]" /> : <Sun className="size-4 text-[#d7a33f]" />}
+            </div>
             <div>
-              <p className="text-sm font-semibold">{getTranslation(lang, 'theme')}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'theme')}</p>
+              <p className="text-[11px] text-muted-foreground">
                 {theme === 'dark' ? getTranslation(lang, 'darkMode') : getTranslation(lang, 'lightMode')}
               </p>
             </div>
@@ -1763,7 +1981,7 @@ function SettingsView({
           <div className="flex rounded-full border border-[#d9dfd9] dark:border-[#2e4235] p-0.5 bg-[#f3f6f2] dark:bg-[#151e18]">
             <button
               onClick={() => onToggleTheme('light')}
-              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                 theme === 'light' ? 'bg-[#1f5f46] text-white shadow-sm' : 'text-muted-foreground'
               }`}
             >
@@ -1771,7 +1989,7 @@ function SettingsView({
             </button>
             <button
               onClick={() => onToggleTheme('dark')}
-              className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                 theme === 'dark' ? 'bg-[#1f5f46] text-white shadow-sm' : 'text-muted-foreground'
               }`}
             >
@@ -1780,14 +1998,72 @@ function SettingsView({
           </div>
         </div>
 
-        {/* Install App on Phone (Shown in browser, hidden when already installed/standalone) */}
-        {!isInstalled && (
-          <div className="setting-row">
-            <div className="flex items-center gap-2">
-              <Smartphone className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+        {/* Change Password */}
+        <div className="pt-2 border-t border-[#edf0eb] dark:border-[#27372d]">
+          <div className="flex items-center justify-between py-1">
+            <div className="flex items-center gap-2.5">
+              <div className="grid size-8 place-items-center rounded-lg bg-[#f3f6f2] dark:bg-[#1a251f]">
+                <KeyRound className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+              </div>
               <div>
-                <p className="text-sm font-semibold">{getTranslation(lang, 'installApp')}</p>
-                <p className="text-xs text-muted-foreground">{getTranslation(lang, 'installAppDesc')}</p>
+                <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'changePassword')}</p>
+                <p className="text-[11px] text-muted-foreground">Update your login security credentials</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPasswordChange(!showPasswordChange)}
+              className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline"
+            >
+              {showPasswordChange ? getTranslation(lang, 'cancel') : getTranslation(lang, 'edit')}
+            </button>
+          </div>
+
+          {showPasswordChange && (
+            <form onSubmit={handleChangePassword} className="mt-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3.5 text-xs form-stack">
+              <label>
+                {getTranslation(lang, 'newPassword')}
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {getTranslation(lang, 'confirmPassword')}
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </label>
+
+              {passwordMsg.text && (
+                <p className={`text-xs font-semibold ${passwordMsg.isError ? 'text-destructive' : 'text-[#1f5f46] dark:text-[#35b586]'}`}>
+                  {passwordMsg.text}
+                </p>
+              )}
+
+              <button type="submit" disabled={passwordLoading} className="primary-button !min-h-[36px] !py-1 !text-xs mt-1">
+                {passwordLoading ? getTranslation(lang, 'loading') : getTranslation(lang, 'savePassword')}
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Install on phone if in browser */}
+        {!isInstalled && (
+          <div className="pt-2 border-t border-[#edf0eb] dark:border-[#27372d] flex items-center justify-between py-1">
+            <div className="flex items-center gap-2.5">
+              <div className="grid size-8 place-items-center rounded-lg bg-[#e8f3eb] dark:bg-[#1a2d22]">
+                <Smartphone className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'installApp')}</p>
+                <p className="text-[11px] text-muted-foreground">Add to home screen as standalone app</p>
               </div>
             </div>
             <button
@@ -1807,228 +2083,240 @@ function SettingsView({
                   )
                 }
               }}
-              className="primary-button !min-h-[36px] !py-1 !px-3 !text-xs whitespace-nowrap"
+              className="primary-button !min-h-[32px] !py-1 !px-3 !text-xs whitespace-nowrap"
             >
               {getTranslation(lang, 'installBtn')}
             </button>
           </div>
         )}
+      </div>
 
-        {/* Change Password (Available to ALL users including Supervisor) */}
-        <div className="setting-row">
-          <div>
-            <p className="text-sm font-semibold">{getTranslation(lang, 'changePassword')}</p>
-            <p className="text-xs text-muted-foreground">Update your login credentials</p>
-          </div>
-          <button onClick={() => setShowPasswordChange(!showPasswordChange)} className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586]">
-            {showPasswordChange ? getTranslation(lang, 'cancel') : getTranslation(lang, 'edit')}
-          </button>
-        </div>
-
-        {showPasswordChange && (
-          <form onSubmit={handleChangePassword} className="my-2 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3 text-xs form-stack">
-            <label>
-              {getTranslation(lang, 'newPassword')}
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              {getTranslation(lang, 'confirmPassword')}
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
-            </label>
-
-            {passwordMsg.text && (
-              <p className={`text-xs font-semibold ${passwordMsg.isError ? 'text-destructive' : 'text-[#1f5f46] dark:text-[#35b586]'}`}>
-                {passwordMsg.text}
-              </p>
-            )}
-
-            <button type="submit" disabled={passwordLoading} className="primary-button !min-h-[36px] !py-1 !text-xs">
-              {passwordLoading ? getTranslation(lang, 'loading') : getTranslation(lang, 'savePassword')}
+      {/* CARD 2: FARM LEDGER SETUP (ACCOUNTANT & OWNER ONLY) */}
+      {(accountant || owner) && (
+        <div className="settings-card !p-4 space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-[#edf0eb] dark:border-[#27372d]">
+            <div className="flex items-center gap-2">
+              <Wallet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+              <h3 className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">Farm Ledger Setup</h3>
+            </div>
+            <button
+              onClick={() => setEditingBal(!editingBal)}
+              className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline"
+            >
+              {editingBal ? getTranslation(lang, 'cancel') : getTranslation(lang, 'edit')}
             </button>
-          </form>
-        )}
-
-        {/* Opening Balance (Editable by Owner and Accountant) */}
-        <div className="setting-row">
-          <div>
-            <p className="text-sm font-semibold">{getTranslation(lang, 'openingBalance')}</p>
-            <p className="text-xs text-muted-foreground">Starting point for this ledger</p>
           </div>
-          <div className="flex items-center gap-2">
-            <p className="font-bold text-[#1f5f46] dark:text-[#35b586]">{formatCurrency(openingBalance)}</p>
-            {(accountant || owner) && (
-              <button onClick={() => setEditingBal(!editingBal)} className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586]">
-                {editingBal ? getTranslation(lang, 'cancel') : getTranslation(lang, 'edit')}
-              </button>
-            )}
-          </div>
-        </div>
 
-        {editingBal && (
-          <div className="py-2">
-            <div className="flex gap-2">
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'openingBalance')}</p>
+              <p className="text-[11px] text-muted-foreground">Starting cash in hand for current period</p>
+            </div>
+            <span className="text-base font-bold text-[#1f5f46] dark:text-[#35b586]">
+              {formatCurrency(openingBalance)}
+            </span>
+          </div>
+
+          {editingBal && (
+            <div className="p-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] flex gap-2">
               <input
                 type="number"
                 value={newBal}
                 onChange={(e) => setNewBal(e.target.value)}
+                placeholder="Opening Balance"
                 className="flex-1 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-sm bg-white dark:bg-[#151e18]"
               />
-              <button onClick={handleUpdateBalance} className="primary-button !min-h-[36px] !py-1 !px-3 !text-xs">
+              <button onClick={handleUpdateBalance} className="primary-button !min-h-[36px] !py-1 !px-4 !text-xs whitespace-nowrap">
                 {getTranslation(lang, 'save')}
               </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Categories Management (Accountant only) */}
-        {accountant && (
-          <div className="pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold">{getTranslation(lang, 'categories')}</p>
-              <button onClick={() => setShowAddCat(!showAddCat)} className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586]">
-                + {getTranslation(lang, 'addCategory')}
+          {accountant && (
+            <div className="rounded-xl bg-[#e8f3eb] dark:bg-[#1a2d22] p-2.5 text-[11px] text-[#1f5f46] dark:text-[#88d9b6] leading-relaxed">
+              <strong>💡 Period Rollover tip:</strong> When closing a month or harvest cycle, export your records to Excel. Then update this Opening Balance to your closing balance to start fresh!
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CARD 3: CATEGORIES MANAGEMENT (ACCOUNTANT ONLY) */}
+      {accountant && (
+        <div className="settings-card !p-4 space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-[#edf0eb] dark:border-[#27372d]">
+            <div className="flex items-center gap-2">
+              <Tag className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+              <h3 className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">
+                {getTranslation(lang, 'categories')} ({categories.length})
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowAddCat(!showAddCat)}
+              className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline"
+            >
+              {showAddCat ? getTranslation(lang, 'cancel') : `+ ${getTranslation(lang, 'addCategory')}`}
+            </button>
+          </div>
+
+          {showAddCat && (
+            <div className="rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3 text-xs form-stack mb-2">
+              <label>
+                {getTranslation(lang, 'categoryName')}
+                <input
+                  placeholder="e.g. Irrigation, Fuel, Coconut Sale"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                />
+              </label>
+              <label>
+                {getTranslation(lang, 'categoryType')}
+                <select
+                  value={newCatType}
+                  onChange={(e) => setNewCatType(e.target.value as any)}
+                >
+                  <option value="Farm">{getTranslation(lang, 'farm')}</option>
+                  <option value="Personal">{getTranslation(lang, 'personal')}</option>
+                </select>
+              </label>
+              <button onClick={handleAddCategory} className="primary-button !min-h-[34px] !py-1 !text-xs mt-1">
+                {getTranslation(lang, 'save')}
               </button>
             </div>
+          )}
 
-            {showAddCat && (
-              <div className="mb-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3 text-xs form-stack">
-                <label>
-                  {getTranslation(lang, 'categoryName')}
-                  <input
-                    placeholder="e.g. Irrigation, Fuel, Coconut Sale"
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                  />
-                </label>
-                <label>
-                  {getTranslation(lang, 'categoryType')}
-                  <select
-                    value={newCatType}
-                    onChange={(e) => setNewCatType(e.target.value as any)}
+          {/* Scrollable category list with clean padding */}
+          <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 divide-y divide-[#edf0eb] dark:divide-[#27372d]">
+            {categories.map((c) => (
+              <div key={c.id} className="flex items-center justify-between pt-1.5 pb-1 text-xs">
+                <div className="flex items-center gap-2 min-w-0 pr-2">
+                  <span className={`dot shrink-0 ${c.type === 'Personal' ? 'personal' : ''}`} />
+                  <span className={`truncate font-medium ${c.active ? 'text-[#18221c] dark:text-[#f2f5f3]' : 'text-muted-foreground line-through'}`}>
+                    {c.name}
+                  </span>
+                  <span className={`badge shrink-0 !text-[10px] ${c.type === 'Personal' ? 'badge-amber' : 'badge-green'}`}>
+                    {c.type}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleToggleCategory(c)}
+                    className="text-[11px] font-semibold text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded"
                   >
-                    <option value="Farm">{getTranslation(lang, 'farm')}</option>
-                    <option value="Personal">{getTranslation(lang, 'personal')}</option>
-                  </select>
-                </label>
-                <button onClick={handleAddCategory} className="primary-button !min-h-[32px] !py-1 !text-xs">
-                  {getTranslation(lang, 'save')}
-                </button>
+                    {c.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCategory(c)}
+                    className="text-[11px] font-semibold text-destructive hover:underline px-1 py-0.5"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            )}
+            ))}
+          </div>
+        </div>
+      )}
 
-            <div className="space-y-1">
-              {categories.map((c) => (
-                <div key={c.id} className="flex items-center justify-between py-1.5 text-xs border-b border-[#edf0eb] dark:border-[#27372d] last:border-0">
-                  <div className="flex items-center gap-2">
-                    <span className={`dot ${c.type === 'Personal' ? 'personal' : ''}`} />
-                    <span className={c.active ? 'font-medium' : 'text-muted-foreground line-through'}>
-                      {c.name} ({c.type})
-                    </span>
+      {/* CARD 4: FARM TEAM MEMBERS (ACCOUNTANT ONLY - STRICTLY HIDDEN FOR OTHERS) */}
+      {accountant && (
+        <div className="settings-card !p-4 space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-[#edf0eb] dark:border-[#27372d]">
+            <div className="flex items-center gap-2">
+              <Users className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+              <h3 className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">
+                Farm Team ({profiles.length})
+              </h3>
+            </div>
+            <button
+              onClick={() => setShowAddUser(!showAddUser)}
+              className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline"
+            >
+              {showAddUser ? getTranslation(lang, 'cancel') : `+ ${getTranslation(lang, 'createUser')}`}
+            </button>
+          </div>
+
+          {showAddUser && (
+            <form onSubmit={handleCreateUser} className="rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3.5 text-xs form-stack mb-2">
+              <label>
+                {getTranslation(lang, 'enterUsername')}
+                <input
+                  placeholder="e.g. kannan or supervisor2"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {getTranslation(lang, 'fullName')}
+                <input
+                  placeholder="e.g. Kannan S."
+                  value={newUserFullName}
+                  onChange={(e) => setNewUserFullName(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {getTranslation(lang, 'role')}
+                <select
+                  value={newUserRole}
+                  onChange={(e) => setNewUserRole(e.target.value as any)}
+                >
+                  <option value="supervisor">{getTranslation(lang, 'supervisor')}</option>
+                  <option value="owner">{getTranslation(lang, 'owner')}</option>
+                </select>
+              </label>
+              <label>
+                {getTranslation(lang, 'initialPassword')}
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </label>
+
+              {userMsg.text && (
+                <p className={`text-xs font-semibold ${userMsg.isError ? 'text-destructive' : 'text-[#1f5f46] dark:text-[#35b586]'}`}>
+                  {userMsg.text}
+                </p>
+              )}
+
+              <button type="submit" disabled={userLoading} className="primary-button !min-h-[34px] !py-1 !text-xs mt-1">
+                {userLoading ? getTranslation(lang, 'loading') : getTranslation(lang, 'save')}
+              </button>
+            </form>
+          )}
+
+          {/* Clean Member List */}
+          <div className="space-y-2">
+            {profiles.map((p) => (
+              <div key={p.id} className="flex items-center justify-between p-2 rounded-xl bg-[#f8faf7] dark:bg-[#1a251f] text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="grid size-7 place-items-center rounded-full bg-[#e8f0eb] dark:bg-[#25372c] text-[#1f5f46] dark:text-[#35b586] font-bold text-xs">
+                    {p.name.charAt(0).toUpperCase()}
                   </div>
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      onClick={() => handleToggleCategory(c)}
-                      className="text-[11px] font-semibold text-muted-foreground hover:text-foreground"
-                    >
-                      {c.active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCategory(c)}
-                      className="text-[11px] font-semibold text-destructive hover:underline"
-                    >
-                      Delete
-                    </button>
+                  <div>
+                    <p className="font-semibold text-[#18221c] dark:text-[#f2f5f3]">{p.name}</p>
+                    <p className="text-[10px] text-muted-foreground">@{p.username}</p>
                   </div>
                 </div>
-              ))}
-            </div>
+                <span className={`badge ${p.role === 'accountant' ? 'badge-green' : p.role === 'owner' ? 'badge-amber' : 'badge-grey'} capitalize`}>
+                  {p.role}
+                </span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* User / Supervisor Creation (Accountant only, no cluttered team list) */}
-        {accountant && (
-          <div className="pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold">{getTranslation(lang, 'userList')}</p>
-              <button onClick={() => setShowAddUser(!showAddUser)} className="text-xs font-semibold text-[#1f5f46] dark:text-[#35b586]">
-                {showAddUser ? getTranslation(lang, 'cancel') : `+ ${getTranslation(lang, 'createUser')}`}
-              </button>
-            </div>
-
-            {showAddUser && (
-              <form onSubmit={handleCreateUser} className="mb-4 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] p-3 text-xs form-stack">
-                <label>
-                  {getTranslation(lang, 'enterUsername')}
-                  <input
-                    placeholder="e.g. kannan or supervisor2"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  {getTranslation(lang, 'fullName')}
-                  <input
-                    placeholder="e.g. Kannan S."
-                    value={newUserFullName}
-                    onChange={(e) => setNewUserFullName(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  {getTranslation(lang, 'role')}
-                  <select
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value as any)}
-                  >
-                    <option value="supervisor">{getTranslation(lang, 'supervisor')}</option>
-                    <option value="owner">{getTranslation(lang, 'owner')}</option>
-                  </select>
-                </label>
-                <label>
-                  {getTranslation(lang, 'initialPassword')}
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    required
-                    minLength={6}
-                  />
-                </label>
-
-                {userMsg.text && (
-                  <p className={`text-xs font-semibold ${userMsg.isError ? 'text-destructive' : 'text-[#1f5f46] dark:text-[#35b586]'}`}>
-                    {userMsg.text}
-                  </p>
-                )}
-
-                <button type="submit" disabled={userLoading} className="primary-button !min-h-[34px] !py-1 !text-xs">
-                  {userLoading ? getTranslation(lang, 'loading') : getTranslation(lang, 'save')}
-                </button>
-              </form>
-            )}
-          </div>
-        )}
-      </div>
-
-      <button onClick={onLogout} className="secondary-button mt-4 w-full text-destructive hover:bg-destructive/10">
+      {/* LOGOUT BUTTON */}
+      <button onClick={onLogout} className="secondary-button w-full text-destructive hover:bg-destructive/10 !min-h-[44px]">
         <LogOut className="size-4" />
         {getTranslation(lang, 'switchUser')}
       </button>
-    </>
+    </div>
   )
 }
 
@@ -2297,11 +2585,20 @@ function DepositModal({
           />
         </label>
 
-        {!owner && (
+        {!owner ? (
           <label>
-            <span>{getTranslation(lang, 'from')}</span>
+            <span>Source / Deposit Type</span>
             <input
-              placeholder="e.g. Owner (Ashok), md hassan"
+              placeholder="e.g. Owner Deposit (Ashok), Coconut Sales Income, Extra Capital"
+              value={fromName}
+              onChange={(e) => setFromName(e.target.value)}
+            />
+          </label>
+        ) : (
+          <label>
+            <span>Sender Name</span>
+            <input
+              placeholder="Your Name (e.g. Ashok)"
               value={fromName}
               onChange={(e) => setFromName(e.target.value)}
             />
@@ -2322,10 +2619,10 @@ function DepositModal({
 
         <label>
           <span>
-            {getTranslation(lang, 'reference')} <span className="font-normal text-muted-foreground">(optional)</span>
+            {owner ? 'Note / Purpose' : 'Description / Reference Note'} <span className="font-normal text-muted-foreground">(optional)</span>
           </span>
           <input
-            placeholder="UPI ref or Cheque / Transaction ID"
+            placeholder={owner ? 'e.g. Weekly farm wages, Fertilizer advance' : 'e.g. 2,500 Coconuts sold, Harvest advance, UPI Ref'}
             value={reference}
             onChange={(e) => setReference(e.target.value)}
           />
