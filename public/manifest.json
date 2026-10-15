@@ -1,0 +1,28 @@
+{
+  "name": "Thoppu Ledger",
+  "short_name": "ThoppuLedger",
+  "description": "Simple, honest bookkeeping for your coconut grove",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fafaf7",
+  "theme_color": "#1f5f46",
+  "icons": [
+    {
+      "src": "/icon-light-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
