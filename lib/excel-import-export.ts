@@ -113,7 +113,7 @@ export async function parseExcelFile(file: File, categories: Category[]): Promis
     const dIdx = row.findIndex((c: string) => c.includes('date') || c.includes('தேதி'))
     const pIdx = row.findIndex((c: string) => c.includes('particular') || c.includes('விவரம்'))
     const eIdx = row.findIndex((c: string) => c.includes('expense') || c.includes('செலவு'))
-    const iIdx = row.findIndex((c: string) => c.includes('income') || c.includes('வரவு'))
+    const iIdx = row.findIndex((c: string) => c.includes('deposit') || c.includes('income') || c.includes('வரவு'))
 
     if (dIdx !== -1 && pIdx !== -1) {
       headerIndex = i
@@ -194,7 +194,8 @@ export function exportToExcel(
     date: string
     particular: string
     expense: number
-    income: number
+    income?: number
+    deposit?: number
     balance: number
   }>,
   openingBalance: number,
@@ -203,16 +204,17 @@ export function exportToExcel(
   const wb = XLSX.utils.book_new()
 
   const excelData = [
-    ['Date', 'Particular', 'Expenses', 'Income', 'Balance'],
+    ['Date', 'Particular', 'Expenses', 'Deposit', 'Balance'],
     [new Date().toISOString().slice(0, 10), 'Opening Balance', '', '', openingBalance],
   ]
 
   for (const r of rows) {
+    const depVal = r.deposit !== undefined && r.deposit > 0 ? r.deposit : (r.income && r.income > 0 ? r.income : '')
     excelData.push([
       r.date,
       r.particular,
       r.expense > 0 ? (r.expense as any) : '',
-      r.income > 0 ? (r.income as any) : '',
+      depVal as any,
       r.balance as any,
     ])
   }

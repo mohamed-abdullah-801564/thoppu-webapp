@@ -795,6 +795,8 @@ function AccountantView({
             profile={profile}
             openingBalance={openingBalance}
             categories={categories}
+            expenses={expenses}
+            deposits={deposits}
             lang={lang}
             theme={theme}
             onToggleTheme={onToggleTheme}
@@ -1040,6 +1042,8 @@ function OwnerView({
           <SettingsView
             profile={profile}
             openingBalance={openingBalance}
+            expenses={expenses}
+            deposits={deposits}
             lang={lang}
             theme={theme}
             onToggleTheme={onToggleTheme}
@@ -1273,7 +1277,7 @@ function LedgerScreen({
 
   // Download CSV
   const handleDownloadCSV = () => {
-    const headers = ['Date', 'Particular', 'Expenses', 'Income', 'Balance']
+    const headers = ['Date', 'Particular', 'Expenses', 'Deposit', 'Balance']
     const csvRows = [headers.join(',')]
     csvRows.push([formatDate(new Date().toISOString().slice(0, 10)), 'Opening Balance', '', '', openingBalance].join(','))
 
@@ -1303,7 +1307,7 @@ function LedgerScreen({
         date: formatDate(r.date),
         particular: r.particular,
         expense: r.expense,
-        income: r.income,
+        deposit: r.income,
         balance: r.balance,
       })),
       openingBalance,
@@ -1422,7 +1426,7 @@ function LedgerScreen({
               className="primary-button !min-h-[40px] text-xs"
             >
               <Plus className="size-4" />
-              + Income / Deposit
+              + Record Deposit
             </button>
             <button
               onClick={() => setShowImportModal(true)}
@@ -1441,7 +1445,7 @@ function LedgerScreen({
           <span>Date</span>
           <span>Particular</span>
           <span className="text-right">Expense</span>
-          <span className="text-right">Income</span>
+          <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">Deposit</span>
           <span className="text-right">Balance</span>
         </div>
 
@@ -1704,6 +1708,8 @@ function SettingsView({
   profile,
   openingBalance,
   categories = [],
+  expenses = [],
+  deposits = [],
   lang,
   theme,
   onToggleTheme,
@@ -1717,6 +1723,8 @@ function SettingsView({
   profile: Profile
   openingBalance: number
   categories?: Category[]
+  expenses?: Expense[]
+  deposits?: Deposit[]
   lang: Language
   theme: 'light' | 'dark'
   onToggleTheme: (t: 'light' | 'dark') => void
@@ -1733,6 +1741,16 @@ function SettingsView({
   const [editingBal, setEditingBal] = useState(false)
   const [newBal, setNewBal] = useState(openingBalance.toString())
   const [isInstalled, setIsInstalled] = useState(false)
+
+  // Live closing balance calculations
+  const confirmedDeposits = (deposits || []).reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
+  const allExpensesSum = (expenses || []).reduce((s, e) => s + Number(e.amount), 0)
+  const currentClosingBalance = openingBalance + confirmedDeposits - allExpensesSum
+
+  // Month-end rollover modal state
+  const [showRolloverModal, setShowRolloverModal] = useState(false)
+  const [customRolloverBal, setCustomRolloverBal] = useState(currentClosingBalance.toString())
+  const [rolloverLoading, setRolloverLoading] = useState(false)
 
   useEffect(() => {
     const checkInstalled = () => {
@@ -1788,6 +1806,29 @@ function SettingsView({
     await supabase.from('settings').update({ opening_balance: val }).eq('property_id', DEFAULT_PROPERTY_ID)
     setEditingBal(false)
     onRefresh()
+  }
+
+  const handleApplyRollover = async () => {
+    const val = parseFloat(customRolloverBal)
+    if (isNaN(val)) {
+      alert('Please enter a valid amount')
+      return
+    }
+    setRolloverLoading(true)
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .update({ opening_balance: val })
+        .eq('property_id', DEFAULT_PROPERTY_ID)
+
+      if (error) throw error
+      setShowRolloverModal(false)
+      onRefresh()
+    } catch (err: any) {
+      alert(`Error updating balance: ${err.message}`)
+    } finally {
+      setRolloverLoading(false)
+    }
   }
 
   const handleAddCategory = async () => {
@@ -2091,13 +2132,13 @@ function SettingsView({
         )}
       </div>
 
-      {/* CARD 2: FARM LEDGER SETUP (ACCOUNTANT & OWNER ONLY) */}
+      {/* CARD 2: FARM LEDGER SETUP & CLOSING (ACCOUNTANT & OWNER ONLY) */}
       {(accountant || owner) && (
         <div className="settings-card !p-4 space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-[#edf0eb] dark:border-[#27372d]">
             <div className="flex items-center gap-2">
               <Wallet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
-              <h3 className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">Farm Ledger Setup</h3>
+              <h3 className="text-sm font-bold text-[#18221c] dark:text-[#f2f5f3]">Farm Ledger Setup & Balances</h3>
             </div>
             <button
               onClick={() => setEditingBal(!editingBal)}
@@ -2132,9 +2173,33 @@ function SettingsView({
             </div>
           )}
 
+          {/* Current Closing Cash Balance */}
+          <div className="flex items-center justify-between py-1 pt-2 border-t border-[#edf0eb] dark:border-[#27372d]">
+            <div>
+              <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">Current Closing Cash in Hand</p>
+              <p className="text-[11px] text-muted-foreground">Opening + Deposits - Expenses</p>
+            </div>
+            <span className={`text-base font-bold ${currentClosingBalance >= 0 ? 'text-[#1f5f46] dark:text-[#35b586]' : 'text-destructive'}`}>
+              {formatCurrency(currentClosingBalance)}
+            </span>
+          </div>
+
           {accountant && (
-            <div className="rounded-xl bg-[#e8f3eb] dark:bg-[#1a2d22] p-2.5 text-[11px] text-[#1f5f46] dark:text-[#88d9b6] leading-relaxed">
-              <strong>💡 Period Rollover tip:</strong> When closing a month or harvest cycle, export your records to Excel. Then update this Opening Balance to your closing balance to start fresh!
+            <div className="pt-2 border-t border-[#edf0eb] dark:border-[#27372d] space-y-2">
+              <div className="rounded-xl bg-[#e8f3eb] dark:bg-[#1a2d22] p-2.5 text-[11px] text-[#1f5f46] dark:text-[#88d9b6] leading-relaxed">
+                <strong>💡 Month-End Closing:</strong> Ready to close the month? Customize the closing balance and carry it forward as the new starting balance.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomRolloverBal(currentClosingBalance.toString())
+                  setShowRolloverModal(true)
+                }}
+                className="secondary-button w-full !min-h-[38px] text-xs font-semibold"
+              >
+                <RefreshCw className="size-3.5 text-[#1f5f46] dark:text-[#35b586]" />
+                Month-End Close & Rollover Balance
+              </button>
             </div>
           )}
         </div>
@@ -2316,6 +2381,83 @@ function SettingsView({
         <LogOut className="size-4" />
         {getTranslation(lang, 'switchUser')}
       </button>
+
+      {/* MONTH-END CLOSE & PERIOD ROLLOVER MODAL */}
+      {showRolloverModal && (
+        <Modal title="Month-End Close & Period Rollover" onClose={() => setShowRolloverModal(false)}>
+          <div className="form-stack space-y-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              When closing an accounting period (month or harvest season), export your full ledger for your permanent records, then set your new starting balance.
+            </p>
+
+            <div className="p-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Previous Starting Balance:</span>
+                <span className="font-semibold">{formatCurrency(openingBalance)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Confirmed Deposits:</span>
+                <span className="font-semibold text-[#1f5f46] dark:text-[#35b586]">+{formatCurrency(confirmedDeposits)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Expenses:</span>
+                <span className="font-semibold text-destructive">-{formatCurrency(allExpensesSum)}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-[#d9dfd9] dark:border-[#2e4235] font-bold text-sm">
+                <span>Calculated Closing Cash:</span>
+                <span className={currentClosingBalance >= 0 ? 'text-[#1f5f46] dark:text-[#35b586]' : 'text-destructive'}>
+                  {formatCurrency(currentClosingBalance)}
+                </span>
+              </div>
+            </div>
+
+            <label className="text-xs font-semibold">
+              <span>Customize New Starting Opening Balance (₹)</span>
+              <input
+                type="number"
+                value={customRolloverBal}
+                onChange={(e) => setCustomRolloverBal(e.target.value)}
+                placeholder="Custom Opening Balance"
+                className="mt-1 w-full rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2.5 text-sm bg-white dark:bg-[#151e18] font-bold"
+              />
+              <span className="text-[11px] text-muted-foreground font-normal mt-0.5 block">
+                You can customize this amount if your physical cash box was rounded or adjusted.
+              </span>
+            </label>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  exportToExcel(
+                    (expenses || []).map((e) => ({
+                      date: formatDate(e.date),
+                      particular: e.note || 'Expense',
+                      expense: Number(e.amount),
+                      deposit: 0,
+                      balance: 0,
+                    })),
+                    openingBalance,
+                    `thoppu-ledger-closing-${new Date().toISOString().slice(0, 10)}.xlsx`
+                  )
+                }}
+                className="secondary-button flex-1 !min-h-[40px] text-xs"
+              >
+                <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+                Archive Excel
+              </button>
+              <button
+                type="button"
+                disabled={rolloverLoading}
+                onClick={handleApplyRollover}
+                className="primary-button flex-1 !min-h-[40px] text-xs whitespace-nowrap"
+              >
+                {rolloverLoading ? 'Applying...' : 'Apply & Start Fresh'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
