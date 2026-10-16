@@ -204,27 +204,28 @@ export function exportToExcel(
   const wb = XLSX.utils.book_new()
 
   const excelData = [
-    ['Date', 'Particular', 'Expenses', 'Deposit', 'Balance'],
-    [new Date().toISOString().slice(0, 10), 'Opening Balance', '', '', openingBalance],
+    ['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance'],
+    [new Date().toISOString().slice(0, 10), 'Opening Balance', '', '', '', openingBalance],
   ]
 
   for (const r of rows) {
-    const depVal = r.deposit !== undefined && r.deposit > 0 ? r.deposit : (r.income && r.income > 0 ? r.income : '')
     excelData.push([
       r.date,
       r.particular,
       r.expense > 0 ? (r.expense as any) : '',
-      depVal as any,
+      r.income && r.income > 0 ? (r.income as any) : '',
+      r.deposit && r.deposit > 0 ? (r.deposit as any) : '',
       r.balance as any,
     ])
   }
 
   const ws = XLSX.utils.aoa_to_sheet(excelData)
 
-  // Auto-width columns
+  // Auto-width columns for 6 columns
   ws['!cols'] = [
     { wch: 14 },
     { wch: 32 },
+    { wch: 14 },
     { wch: 14 },
     { wch: 14 },
     { wch: 16 },

@@ -1210,16 +1210,17 @@ function LedgerScreen({
       particular: string
       expense: number
       income: number
+      deposit: number
       category_id?: string
-      type: 'opening' | 'deposit' | 'expense'
+      type: 'opening' | 'deposit' | 'expense' | 'income'
     }
 
     const items: LedgerRow[] = []
 
-    // 1. Confirmed deposits
+    // 1. Confirmed deposits (Owner capital injections: 50k, 1L, etc.)
     for (const d of deposits) {
       if (d.status === 'Confirmed') {
-        const from = d.from_name ? d.from_name : 'Deposit'
+        const from = d.from_name ? d.from_name : 'Owner'
         const ref = d.reference ? ` · ${d.reference}` : ''
         const particular = `${from}${ref} (${d.mode})`
         items.push({
@@ -1227,25 +1228,29 @@ function LedgerScreen({
           date: d.date,
           particular,
           expense: 0,
-          income: Number(d.amount),
+          income: 0,
+          deposit: Number(d.amount),
           type: 'deposit',
         })
       }
     }
 
-    // 2. All expenses
+    // 2. All expenses and staff incomes (Salaries / Payouts)
     for (const e of expenses) {
       const cat = categories.find((c) => c.id === e.category_id)
       const catName = cat?.name || 'Expense'
       const particular = e.note ? `${catName} (${e.note})` : catName
+      const isIncome = catName.toLowerCase().includes('salary') || catName.toLowerCase().includes('income')
+
       items.push({
         id: e.id,
         date: e.date,
         particular,
-        expense: Number(e.amount),
-        income: 0,
+        expense: isIncome ? 0 : Number(e.amount),
+        income: isIncome ? Number(e.amount) : 0,
+        deposit: 0,
         category_id: e.category_id,
-        type: 'expense',
+        type: isIncome ? 'income' : 'expense',
       })
     }
 
@@ -1264,10 +1269,11 @@ function LedgerScreen({
       filtered = filtered.filter((r) => r.date <= endDate)
     }
 
-    // Calculate running balance row by row
+    // Calculate running balance row by row:
+    // Deposit adds to fund (+); Expense & Income (staff salary) reduce fund (-)
     let running = openingBalance
     return filtered.map((item) => {
-      running = running + item.income - item.expense
+      running = running + item.deposit - item.expense - item.income
       return {
         ...item,
         balance: running,
@@ -1275,19 +1281,20 @@ function LedgerScreen({
     })
   }, [expenses, deposits, categories, openingBalance, categoryFilter, startDate, endDate])
 
-  // Download CSV
+  // Download CSV (6 columns)
   const handleDownloadCSV = () => {
-    const headers = ['Date', 'Particular', 'Expenses', 'Deposit', 'Balance']
+    const headers = ['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance']
     const csvRows = [headers.join(',')]
-    csvRows.push([formatDate(new Date().toISOString().slice(0, 10)), 'Opening Balance', '', '', openingBalance].join(','))
+    csvRows.push([formatDate(new Date().toISOString().slice(0, 10)), 'Opening Balance', '', '', '', openingBalance].join(','))
 
     for (const r of rows) {
       const dateStr = formatDate(r.date)
       const partStr = `"${r.particular.replace(/"/g, '""')}"`
       const expStr = r.expense > 0 ? r.expense : ''
       const incStr = r.income > 0 ? r.income : ''
+      const depStr = r.deposit > 0 ? r.deposit : ''
       const balStr = r.balance
-      csvRows.push([dateStr, partStr, expStr, incStr, balStr].join(','))
+      csvRows.push([dateStr, partStr, expStr, incStr, depStr, balStr].join(','))
     }
 
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -1300,14 +1307,15 @@ function LedgerScreen({
     document.body.removeChild(link)
   }
 
-  // Download .xlsx Excel
+  // Download .xlsx Excel (6 columns)
   const handleDownloadExcel = () => {
     exportToExcel(
       rows.map((r) => ({
         date: formatDate(r.date),
         particular: r.particular,
         expense: r.expense,
-        deposit: r.income,
+        income: r.income,
+        deposit: r.deposit,
         balance: r.balance,
       })),
       openingBalance,
@@ -1439,54 +1447,61 @@ function LedgerScreen({
         )}
       </div>
 
-      {/* Ledger Table */}
-      <div className="ledger-table">
-        <div className="ledger-head !grid-cols-[56px_1fr_64px_64px_68px] !gap-1">
-          <span>Date</span>
-          <span>Particular</span>
-          <span className="text-right">Expense</span>
-          <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">Deposit</span>
-          <span className="text-right">Balance</span>
-        </div>
-
-        {/* Opening balance row */}
-        <div className="ledger-row opening-row !grid-cols-[56px_1fr_64px_64px_68px] !gap-1 font-semibold">
-          <span>—</span>
-          <span className="truncate text-[#1f5f46] dark:text-[#35b586]">Opening Balance</span>
-          <span className="text-right">—</span>
-          <span className="text-right">—</span>
-          <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">{formatCurrency(openingBalance)}</span>
-        </div>
-
-        {rows.slice().reverse().map((r) => (
-          <div
-            key={r.id}
-            onClick={() => {
-              if (!accountant) return
-              if (r.type === 'expense') {
-                const exp = expenses.find((e) => e.id === r.id)
-                if (exp) setSelectedExpense(exp)
-              } else if (r.type === 'deposit') {
-                const dep = deposits.find((d) => d.id === r.id)
-                if (dep) setSelectedDeposit(dep)
-              }
-            }}
-            className={`ledger-row !grid-cols-[56px_1fr_64px_64px_68px] !gap-1 ${accountant ? 'cursor-pointer hover:bg-[#f5f8f5] dark:hover:bg-[#1a251f] transition-colors' : ''}`}
-            title={accountant ? 'Click to inspect or edit details' : undefined}
-          >
-            <span className="truncate text-muted-foreground">{formatDate(r.date).slice(0, 5)}</span>
-            <span className="truncate font-medium">{r.particular}</span>
-            <span className="text-right text-destructive font-semibold">
-              {r.expense > 0 ? formatCurrency(r.expense).replace('₹', '') : '—'}
-            </span>
-            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-semibold">
-              {r.income > 0 ? formatCurrency(r.income).replace('₹', '') : '—'}
-            </span>
-            <span className="text-right font-bold">
-              {formatCurrency(r.balance).replace('₹', '')}
-            </span>
+      {/* Ledger Table (6 Columns: Date, Particular, Expense, Income, Deposit, Balance) */}
+      <div className="overflow-x-auto -mx-1 px-1">
+        <div className="ledger-table min-w-[365px]">
+          <div className="ledger-head !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 text-[11px]">
+            <span>Date</span>
+            <span>Particular</span>
+            <span className="text-right text-destructive font-bold">Expense</span>
+            <span className="text-right text-blue-600 dark:text-blue-400 font-bold">Income</span>
+            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">Deposit</span>
+            <span className="text-right font-bold">Balance</span>
           </div>
-        ))}
+
+          {/* Opening balance row */}
+          <div className="ledger-row opening-row !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 font-semibold text-xs">
+            <span>—</span>
+            <span className="truncate text-[#1f5f46] dark:text-[#35b586]">Opening Balance</span>
+            <span className="text-right">—</span>
+            <span className="text-right">—</span>
+            <span className="text-right">—</span>
+            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">{formatCurrency(openingBalance)}</span>
+          </div>
+
+          {rows.slice().reverse().map((r) => (
+            <div
+              key={r.id}
+              onClick={() => {
+                if (!accountant) return
+                if (r.type === 'expense' || r.type === 'income') {
+                  const exp = expenses.find((e) => e.id === r.id)
+                  if (exp) setSelectedExpense(exp)
+                } else if (r.type === 'deposit') {
+                  const dep = deposits.find((d) => d.id === r.id)
+                  if (dep) setSelectedDeposit(dep)
+                }
+              }}
+              className={`ledger-row !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 text-xs ${accountant ? 'cursor-pointer hover:bg-[#f5f8f5] dark:hover:bg-[#1a251f] transition-colors' : ''}`}
+              title={accountant ? 'Click to inspect or edit details' : undefined}
+            >
+              <span className="truncate text-muted-foreground">{formatDate(r.date).slice(0, 5)}</span>
+              <span className="truncate font-medium">{r.particular}</span>
+              <span className="text-right text-destructive font-semibold">
+                {r.expense > 0 ? formatCurrency(r.expense).replace('₹', '') : '—'}
+              </span>
+              <span className="text-right text-blue-600 dark:text-blue-400 font-semibold">
+                {r.income > 0 ? formatCurrency(r.income).replace('₹', '') : '—'}
+              </span>
+              <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-semibold">
+                {r.deposit > 0 ? formatCurrency(r.deposit).replace('₹', '') : '—'}
+              </span>
+              <span className="text-right font-bold">
+                {formatCurrency(r.balance).replace('₹', '')}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* MODALS */}
