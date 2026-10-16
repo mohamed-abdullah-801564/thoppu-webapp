@@ -426,15 +426,26 @@ function SupervisorView({
   onRefresh: () => void
   deferredPrompt: any
   onPwaInstalled: () => void
+  periodStartDate?: string | null
 }) {
   const [tab, setTab] = useState('home')
   const [filter, setFilter] = useState<'All' | 'Submitted' | 'Verified' | 'Query'>('All')
   const [showAdd, setShowAdd] = useState(false)
   const [selected, setSelected] = useState<Expense | null>(null)
 
-  // Calculations (Opening Balance + confirmed deposits - all expenses)
-  const confirmedDeposits = deposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
-  const allExpensesSum = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  // Calculations for current period (Opening Balance + confirmed deposits - all expenses)
+  const activeDeposits = useMemo(() => {
+    if (!periodStartDate) return deposits
+    return deposits.filter((d) => !d.created_at || d.created_at >= periodStartDate)
+  }, [deposits, periodStartDate])
+
+  const activeExpenses = useMemo(() => {
+    if (!periodStartDate) return expenses
+    return expenses.filter((e) => !e.created_at || e.created_at >= periodStartDate)
+  }, [expenses, periodStartDate])
+
+  const confirmedDeposits = activeDeposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
+  const allExpensesSum = activeExpenses.reduce((s, e) => s + Number(e.amount), 0)
   const cashInHand = openingBalance + confirmedDeposits - allExpensesSum
 
   const myExpenses = expenses.filter((e) => !e.user_id || e.user_id === profile.id)
@@ -528,6 +539,7 @@ function SupervisorView({
             onRefresh={onRefresh}
             deferredPrompt={deferredPrompt}
             onPwaInstalled={onPwaInstalled}
+            periodStartDate={periodStartDate}
           />
         )}
       </div>
@@ -595,15 +607,26 @@ function AccountantView({
   onRefresh: () => void
   deferredPrompt: any
   onPwaInstalled: () => void
+  periodStartDate?: string | null
 }) {
   const [tab, setTab] = useState('home')
   const [selected, setSelected] = useState<Expense | null>(null)
   const [showDeposit, setShowDeposit] = useState(false)
   const [showDirectExpense, setShowDirectExpense] = useState(false)
 
-  // Core rule: Balance = Opening Balance + Confirmed deposits - ALL expenses (including submitted & query)
-  const confirmedDeposits = deposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
-  const allExpensesSum = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  // Core rule: Balance = Opening Balance + Confirmed deposits - ALL expenses (current period)
+  const activeDeposits = useMemo(() => {
+    if (!periodStartDate) return deposits
+    return deposits.filter((d) => !d.created_at || d.created_at >= periodStartDate)
+  }, [deposits, periodStartDate])
+
+  const activeExpenses = useMemo(() => {
+    if (!periodStartDate) return expenses
+    return expenses.filter((e) => !e.created_at || e.created_at >= periodStartDate)
+  }, [expenses, periodStartDate])
+
+  const confirmedDeposits = activeDeposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
+  const allExpensesSum = activeExpenses.reduce((s, e) => s + Number(e.amount), 0)
   const currentBalance = openingBalance + confirmedDeposits - allExpensesSum
 
   const pendingExpenses = expenses.filter((e) => e.status === 'Submitted')
@@ -786,6 +809,7 @@ function AccountantView({
             accountant
             profile={profile}
             onRefresh={onRefresh}
+            periodStartDate={periodStartDate}
           />
         )}
 
@@ -804,6 +828,7 @@ function AccountantView({
             accountant
             deferredPrompt={deferredPrompt}
             onPwaInstalled={onPwaInstalled}
+            periodStartDate={periodStartDate}
           />
         )}
       </div>
@@ -885,15 +910,26 @@ function OwnerView({
   onRefresh: () => void
   deferredPrompt: any
   onPwaInstalled: () => void
+  periodStartDate?: string | null
 }) {
   const [tab, setTab] = useState('home')
   const [showSend, setShowSend] = useState(false)
   const [selected, setSelected] = useState<Expense | null>(null)
   const [typeFilter, setTypeFilter] = useState<'All' | 'Farm' | 'Personal'>('All')
 
-  // Totals
-  const confirmedDeposits = deposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
-  const allExpensesSum = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  // Totals for current active period
+  const activeDeposits = useMemo(() => {
+    if (!periodStartDate) return deposits
+    return deposits.filter((d) => !d.created_at || d.created_at >= periodStartDate)
+  }, [deposits, periodStartDate])
+
+  const activeExpenses = useMemo(() => {
+    if (!periodStartDate) return expenses
+    return expenses.filter((e) => !e.created_at || e.created_at >= periodStartDate)
+  }, [expenses, periodStartDate])
+
+  const confirmedDeposits = activeDeposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
+  const allExpensesSum = activeExpenses.reduce((s, e) => s + Number(e.amount), 0)
   const totalBalance = openingBalance + confirmedDeposits - allExpensesSum
 
   // Farm vs Personal breakdown for Verified expenses
@@ -1038,6 +1074,7 @@ function OwnerView({
             owner
             deferredPrompt={deferredPrompt}
             onPwaInstalled={onPwaInstalled}
+            periodStartDate={periodStartDate}
           />
         )}
       </div>
@@ -1165,6 +1202,7 @@ function LedgerScreen({
   accountant,
   profile,
   onRefresh,
+  periodStartDate,
 }: {
   expenses: Expense[]
   deposits: Deposit[]
@@ -1174,7 +1212,9 @@ function LedgerScreen({
   accountant?: boolean
   profile?: Profile
   onRefresh?: () => void
+  periodStartDate?: string | null
 }) {
+  const [periodMode, setPeriodMode] = useState<'current' | 'all'>('current')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -1193,6 +1233,7 @@ function LedgerScreen({
     type LedgerRow = {
       id: string
       date: string
+      created_at?: string
       particular: string
       expense: number
       income: number
@@ -1212,6 +1253,7 @@ function LedgerScreen({
         items.push({
           id: d.id,
           date: d.date,
+          created_at: d.created_at,
           particular,
           expense: 0,
           income: 0,
@@ -1231,6 +1273,7 @@ function LedgerScreen({
       items.push({
         id: e.id,
         date: e.date,
+        created_at: e.created_at,
         particular,
         expense: isIncome ? 0 : Number(e.amount),
         income: isIncome ? Number(e.amount) : 0,
@@ -1245,6 +1288,9 @@ function LedgerScreen({
 
     // Filter
     let filtered = items
+    if (periodMode === 'current' && periodStartDate) {
+      filtered = filtered.filter((r) => !r.created_at || r.created_at >= periodStartDate)
+    }
     if (categoryFilter !== 'ALL') {
       filtered = filtered.filter((r) => r.category_id === categoryFilter)
     }
@@ -1265,7 +1311,7 @@ function LedgerScreen({
         balance: running,
       }
     })
-  }, [expenses, deposits, categories, openingBalance, categoryFilter, startDate, endDate])
+  }, [expenses, deposits, categories, openingBalance, categoryFilter, startDate, endDate, periodMode, periodStartDate])
 
   // Download CSV (6 columns)
   const handleDownloadCSV = () => {
@@ -1363,6 +1409,34 @@ function LedgerScreen({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Period Filter Selector: Current Period vs Full Archive */}
+      {periodStartDate && (
+        <div className="mb-4 flex items-center justify-between gap-2 p-1.5 rounded-2xl bg-[#f0f4f1] dark:bg-[#151e18] border border-[#d9dfd9] dark:border-[#2e4235]">
+          <button
+            type="button"
+            onClick={() => setPeriodMode('current')}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold transition-all ${
+              periodMode === 'current'
+                ? 'bg-white dark:bg-[#1f2c23] text-[#18221c] dark:text-[#f2f5f3] shadow-sm font-bold'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Current Period (Active)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPeriodMode('all')}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold transition-all ${
+              periodMode === 'all'
+                ? 'bg-white dark:bg-[#1f2c23] text-[#18221c] dark:text-[#f2f5f3] shadow-sm font-bold'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Full Archive (All Time)
+          </button>
         </div>
       )}
 
@@ -1735,8 +1809,9 @@ function SettingsView({
   owner?: boolean
   deferredPrompt?: any
   onPwaInstalled?: () => void
+  periodStartDate?: string | null
 }) {
-  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [profiles, setProfiles] = useState<any[]>([])
   const [editingName, setEditingName] = useState(false)
   const [newName, setNewName] = useState(profile.name)
   const [editingBal, setEditingBal] = useState(false)
@@ -1744,9 +1819,19 @@ function SettingsView({
   const [isInstalled, setIsInstalled] = useState(false)
   const [showInstallModal, setShowInstallModal] = useState(false)
 
-  // Live closing balance calculations
-  const confirmedDeposits = (deposits || []).reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
-  const allExpensesSum = (expenses || []).reduce((s, e) => s + Number(e.amount), 0)
+  // Live closing balance calculations for active period
+  const activeDeposits = useMemo(() => {
+    if (!periodStartDate) return deposits || []
+    return (deposits || []).filter((d) => !d.created_at || d.created_at >= periodStartDate)
+  }, [deposits, periodStartDate])
+
+  const activeExpenses = useMemo(() => {
+    if (!periodStartDate) return expenses || []
+    return (expenses || []).filter((e) => !e.created_at || e.created_at >= periodStartDate)
+  }, [expenses, periodStartDate])
+
+  const confirmedDeposits = activeDeposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
+  const allExpensesSum = activeExpenses.reduce((s, e) => s + Number(e.amount), 0)
   const currentClosingBalance = openingBalance + confirmedDeposits - allExpensesSum
 
   // Month-end rollover modal state
@@ -1788,12 +1873,34 @@ function SettingsView({
   const [userLoading, setUserLoading] = useState(false)
   const [userMsg, setUserMsg] = useState({ text: '', isError: false })
 
-  // Load team members
-  useEffect(() => {
-    supabase.from('profiles').select('*').then(({ data }) => {
+  // Load team members with active/banned status from /api/admin/users
+  const loadTeamMembers = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (token && accountant) {
+        const res = await fetch('/api/admin/users', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const json = await res.json()
+          if (json.users) {
+            setProfiles(json.users)
+            return
+          }
+        }
+      }
+      const { data } = await supabase.from('profiles').select('*')
       if (data) setProfiles(data as Profile[])
-    })
-  }, [])
+    } catch {
+      const { data } = await supabase.from('profiles').select('*')
+      if (data) setProfiles(data as Profile[])
+    }
+  }
+
+  useEffect(() => {
+    loadTeamMembers()
+  }, [accountant])
 
   const handleUpdateName = async () => {
     if (!newName.trim()) return
@@ -1818,9 +1925,13 @@ function SettingsView({
     }
     setRolloverLoading(true)
     try {
+      const nowIso = new Date().toISOString()
       const { error } = await supabase
         .from('settings')
-        .update({ opening_balance: val })
+        .update({
+          opening_balance: val,
+          updated_at: nowIso,
+        })
         .eq('property_id', DEFAULT_PROPERTY_ID)
 
       if (error) throw error
@@ -1953,14 +2064,52 @@ function SettingsView({
       setNewUserPassword('')
 
       // Reload team
-      const { data } = await supabase.from('profiles').select('*')
-      if (data) setProfiles(data as Profile[])
+      loadTeamMembers()
 
       setTimeout(() => setShowAddUser(false), 1500)
     } catch (err: any) {
       setUserMsg({ text: err.message, isError: true })
     } finally {
       setUserLoading(false)
+    }
+  }
+
+  // Toggle supervisor active/inactive
+  const handleToggleUserBan = async (u: any) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: u.id }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to update user status')
+      loadTeamMembers()
+    } catch (err: any) {
+      alert(err.message)
+    }
+  }
+
+  // Delete supervisor
+  const handleDeleteUser = async (u: any) => {
+    if (!confirm(lang === 'ta' ? `"${u.name}" பயனரை நிச்சயமாக நீக்க விரும்புகிறீர்களா?` : `Are you sure you want to permanently delete "${u.name}"?`)) return
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      const res = await fetch(`/api/admin/users?userId=${u.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to delete user')
+      loadTeamMembers()
+    } catch (err: any) {
+      alert(err.message)
     }
   }
 
@@ -2370,19 +2519,42 @@ function SettingsView({
           {/* Clean Member List */}
           <div className="space-y-2">
             {profiles.map((p) => (
-              <div key={p.id} className="flex items-center justify-between p-2 rounded-xl bg-[#f8faf7] dark:bg-[#1a251f] text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="grid size-7 place-items-center rounded-full bg-[#e8f0eb] dark:bg-[#25372c] text-[#1f5f46] dark:text-[#35b586] font-bold text-xs">
+              <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-[#f8faf7] dark:bg-[#1a251f] text-xs">
+                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="grid size-7 shrink-0 place-items-center rounded-full bg-[#e8f0eb] dark:bg-[#25372c] text-[#1f5f46] dark:text-[#35b586] font-bold text-xs">
                     {p.name.charAt(0).toUpperCase()}
                   </div>
-                  <div>
-                    <p className="font-semibold text-[#18221c] dark:text-[#f2f5f3]">{p.name}</p>
-                    <p className="text-[10px] text-muted-foreground">@{p.username}</p>
+                  <div className="min-w-0">
+                    <p className={`font-semibold truncate ${p.is_banned ? 'line-through text-muted-foreground' : 'text-[#18221c] dark:text-[#f2f5f3]'}`}>{p.name}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">@{p.username}</p>
                   </div>
                 </div>
-                <span className={`badge ${p.role === 'accountant' ? 'badge-green' : p.role === 'owner' ? 'badge-amber' : 'badge-grey'} capitalize`}>
-                  {p.role}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`badge ${p.role === 'accountant' ? 'badge-green' : p.role === 'owner' ? 'badge-amber' : 'badge-grey'} capitalize`}>
+                    {p.role}
+                  </span>
+                  {p.is_banned && (
+                    <span className="badge badge-amber !text-[10px]">Inactive</span>
+                  )}
+                  {p.id !== profile.id && p.role === 'supervisor' && (
+                    <div className="flex items-center gap-1.5 ml-1">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleUserBan(p)}
+                        className="text-[11px] font-semibold text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded border border-[#d9dfd9] dark:border-[#2e4235]"
+                      >
+                        {p.is_banned ? 'Activate' : 'Deactivate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser(p)}
+                        className="text-[11px] font-semibold text-destructive hover:underline px-1 py-0.5"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -3124,6 +3296,7 @@ export default function Page() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [deposits, setDeposits] = useState<Deposit[]>([])
   const [openingBalance, setOpeningBalance] = useState(27686)
+  const [periodStartDate, setPeriodStartDate] = useState<string | null>(null)
 
   // PWA install prompt handler
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
@@ -3167,6 +3340,9 @@ export default function Page() {
       if (depRes.data) setDeposits(depRes.data as Deposit[])
       if (setRes.data?.opening_balance !== undefined) {
         setOpeningBalance(Number(setRes.data.opening_balance))
+      }
+      if (setRes.data?.updated_at) {
+        setPeriodStartDate(setRes.data.updated_at)
       }
     } catch (err) {
       console.error('Failed to load ledger data:', err)
@@ -3237,6 +3413,7 @@ export default function Page() {
         onRefresh={loadData}
         deferredPrompt={deferredPrompt}
         onPwaInstalled={() => setDeferredPrompt(null)}
+        periodStartDate={periodStartDate}
       />
     )
   }
@@ -3257,6 +3434,7 @@ export default function Page() {
         onRefresh={loadData}
         deferredPrompt={deferredPrompt}
         onPwaInstalled={() => setDeferredPrompt(null)}
+        periodStartDate={periodStartDate}
       />
     )
   }
@@ -3276,6 +3454,7 @@ export default function Page() {
       onRefresh={loadData}
       deferredPrompt={deferredPrompt}
       onPwaInstalled={() => setDeferredPrompt(null)}
+      periodStartDate={periodStartDate}
     />
   )
 }
