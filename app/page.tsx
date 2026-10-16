@@ -1756,6 +1756,7 @@ function SettingsView({
   const [editingBal, setEditingBal] = useState(false)
   const [newBal, setNewBal] = useState(openingBalance.toString())
   const [isInstalled, setIsInstalled] = useState(false)
+  const [showInstallModal, setShowInstallModal] = useState(false)
 
   // Live closing balance calculations
   const confirmedDeposits = (deposits || []).reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
@@ -2110,19 +2111,34 @@ function SettingsView({
           )}
         </div>
 
-        {/* Install on phone if in browser */}
-        {!isInstalled && (
-          <div className="pt-2 border-t border-[#edf0eb] dark:border-[#27372d] flex items-center justify-between py-1">
-            <div className="flex items-center gap-2.5">
-              <div className="grid size-8 place-items-center rounded-lg bg-[#e8f3eb] dark:bg-[#1a2d22]">
-                <Smartphone className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'installApp')}</p>
-                <p className="text-[11px] text-muted-foreground">Add to home screen as standalone app</p>
-              </div>
+        {/* App Installation & Standalone Status */}
+        <div className="pt-2 border-t border-[#edf0eb] dark:border-[#27372d] flex items-center justify-between py-1">
+          <div className="flex items-center gap-2.5">
+            <div className="grid size-8 place-items-center rounded-lg bg-[#e8f3eb] dark:bg-[#1a2d22]">
+              <Smartphone className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
             </div>
+            <div>
+              <p className="text-xs font-semibold text-[#18221c] dark:text-[#f2f5f3]">{getTranslation(lang, 'installApp')}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {isInstalled
+                  ? (lang === 'ta' ? 'செயலி நிறுவப்பட்டு இயங்குகிறது' : 'Installed & running as standalone app')
+                  : (lang === 'ta' ? 'முகப்புத் திரையில் செயலியாக சேர்க்கவும்' : 'Add to home screen as standalone app')}
+              </p>
+            </div>
+          </div>
+          {isInstalled ? (
             <button
+              type="button"
+              onClick={() => setShowInstallModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f3eb] dark:bg-[#1c3024] px-3 py-1.5 text-xs font-bold text-[#1f5f46] dark:text-[#35b586] hover:opacity-80 transition-opacity"
+              title="Click to view installation info"
+            >
+              <Check className="size-3.5" />
+              {lang === 'ta' ? 'நிறுவப்பட்டது' : 'Installed'}
+            </button>
+          ) : (
+            <button
+              type="button"
               onClick={async () => {
                 if (deferredPrompt) {
                   deferredPrompt.prompt()
@@ -2132,19 +2148,15 @@ function SettingsView({
                     setIsInstalled(true)
                   }
                 } else {
-                  alert(
-                    lang === 'ta'
-                      ? 'செயலியை நிறுவ: Chrome மெனுவைத் தட்டவும் (⋮) -> "செயலியை நிறுவு" அல்லது "முகப்புத் திரையில் சேர்".'
-                      : 'To install on phone: Open in Chrome and tap Menu (⋮) -> "Install App" or "Add to Home Screen".'
-                  )
+                  setShowInstallModal(true)
                 }
               }}
               className="primary-button !min-h-[32px] !py-1 !px-3 !text-xs whitespace-nowrap"
             >
               {getTranslation(lang, 'installBtn')}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* CARD 2: FARM LEDGER SETUP & CLOSING (ACCOUNTANT & OWNER ONLY) */}
@@ -2470,6 +2482,91 @@ function SettingsView({
                 {rolloverLoading ? 'Applying...' : 'Apply & Start Fresh'}
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* INSTALL GUIDE / STANDALONE INFO MODAL */}
+      {showInstallModal && (
+        <Modal
+          title={lang === 'ta' ? 'செயலியை நிறுவுவது எப்படி?' : 'How to Install Thoppu Ledger'}
+          onClose={() => setShowInstallModal(false)}
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3 rounded-2xl bg-[#e8f3eb] dark:bg-[#1a2d22] flex items-center gap-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#1f5f46] text-white">
+                <Smartphone className="size-5" />
+              </div>
+              <div>
+                <p className="font-bold text-[#1f5f46] dark:text-[#35b586] text-sm">
+                  {lang === 'ta' ? 'வேகமான மொபைல் செயலி' : 'Fast, Standalone Farm App'}
+                </p>
+                <p className="text-muted-foreground text-[11px]">
+                  {lang === 'ta'
+                    ? 'முகப்புத் திரையில் சேர்த்தால் பிரவுசர் திறக்காமலே உடனே பயன்படுத்தலாம்.'
+                    : 'Install directly to your home screen or desktop without Play Store.'}
+                </p>
+              </div>
+            </div>
+
+            {isInstalled ? (
+              <div className="p-3.5 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] bg-white dark:bg-[#151e18] space-y-1">
+                <p className="font-bold text-[#1f5f46] dark:text-[#35b586] flex items-center gap-1.5">
+                  <Check className="size-4" />
+                  {lang === 'ta' ? 'செயலி ஏற்கனவே இயங்குகிறது' : 'App is already installed!'}
+                </p>
+                <p className="text-muted-foreground leading-relaxed">
+                  {lang === 'ta'
+                    ? 'நீங்கள் ஏற்கனவே Thoppu Ledger செயலியை உங்கள் சாதனத்தில் நிறுவி பயன்படுத்துகிறீர்கள். உங்கள் மொபைல் முகப்புத் திரையிலிருந்து இதை நேரடியாகத் திறக்கலாம்.'
+                    : 'You are currently running the installed version of Thoppu Ledger. You can access it anytime directly from your phone home screen or computer apps.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="p-3 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] bg-white dark:bg-[#151e18] space-y-1">
+                  <p className="font-bold text-[#18221c] dark:text-[#f2f5f3] flex items-center gap-1.5">
+                    <span className="grid size-5 place-items-center rounded-full bg-[#1f5f46] text-white text-[10px]">1</span>
+                    {lang === 'ta' ? 'Android / Google Chrome' : 'Android / Google Chrome'}
+                  </p>
+                  <p className="text-muted-foreground pl-6 leading-relaxed">
+                    {lang === 'ta'
+                      ? 'Chrome மெனுவைத் தட்டவும் (⋮) -> "செயலியை நிறுவு" அல்லது "முகப்புத் திரையில் சேர்" என்பதைத் தேர்ந்தெடுக்கவும்.'
+                      : 'Tap Chrome menu (⋮) -> Tap "Install app" or "Add to Home screen".'}
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] bg-white dark:bg-[#151e18] space-y-1">
+                  <p className="font-bold text-[#18221c] dark:text-[#f2f5f3] flex items-center gap-1.5">
+                    <span className="grid size-5 place-items-center rounded-full bg-[#1f5f46] text-white text-[10px]">2</span>
+                    {lang === 'ta' ? 'iPhone / Apple Safari' : 'iPhone / Apple Safari'}
+                  </p>
+                  <p className="text-muted-foreground pl-6 leading-relaxed">
+                    {lang === 'ta'
+                      ? 'Safari கீழ் உள்ள Share (⎋) ஐகானைத் தட்டவும் -> கீழே உருட்டி "Add to Home Screen" (+) என்பதைத் தேர்ந்தெடுக்கவும்.'
+                      : 'Tap Share button (⎋) in Safari -> Scroll down and tap "Add to Home Screen" (+).'}
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] bg-white dark:bg-[#151e18] space-y-1">
+                  <p className="font-bold text-[#18221c] dark:text-[#f2f5f3] flex items-center gap-1.5">
+                    <span className="grid size-5 place-items-center rounded-full bg-[#1f5f46] text-white text-[10px]">3</span>
+                    {lang === 'ta' ? 'கணினி / PC (Chrome / Edge)' : 'PC / Computer (Chrome / Edge)'}
+                  </p>
+                  <p className="text-muted-foreground pl-6 leading-relaxed">
+                    {lang === 'ta'
+                      ? 'முகவரிப் பட்டியில் (URL bar) உள்ள "Install" (⊕/💻) ஐகானைக் கிளிக் செய்யவும்.'
+                      : 'Click the "Install" icon (⊕/💻) in your browser address bar.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowInstallModal(false)}
+              className="primary-button w-full !min-h-[40px] text-xs"
+            >
+              {getTranslation(lang, 'close')}
+            </button>
           </div>
         </Modal>
       )}
