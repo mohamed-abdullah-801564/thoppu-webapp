@@ -600,7 +600,6 @@ function AccountantView({
   const [selected, setSelected] = useState<Expense | null>(null)
   const [showDeposit, setShowDeposit] = useState(false)
   const [showDirectExpense, setShowDirectExpense] = useState(false)
-  const [showOwnerDeposit, setShowOwnerDeposit] = useState(false)
 
   // Core rule: Balance = Opening Balance + Confirmed deposits - ALL expenses (including submitted & query)
   const confirmedDeposits = deposits.reduce((s, d) => (d.status === 'Confirmed' ? s + Number(d.amount) : s), 0)
@@ -664,13 +663,13 @@ function AccountantView({
                 <ArrowDownToLine />
                 <span>{getTranslation(lang, 'recordDeposit')}</span>
               </button>
-              <button onClick={() => setShowOwnerDeposit(true)} className="action-card">
-                <IndianRupee />
-                <span>{getTranslation(lang, 'recordOwnerDeposit')}</span>
-              </button>
               <button onClick={() => setShowDirectExpense(true)} className="action-card">
                 <Plus />
                 <span>{getTranslation(lang, 'addEntry')}</span>
+              </button>
+              <button onClick={() => setTab('ledger')} className="action-card">
+                <FileText />
+                <span>{getTranslation(lang, 'ledger')}</span>
               </button>
             </div>
 
@@ -833,19 +832,6 @@ function AccountantView({
           onClose={() => setShowDeposit(false)}
           onSuccess={() => {
             setShowDeposit(false)
-            onRefresh()
-          }}
-        />
-      )}
-
-      {showOwnerDeposit && (
-        <DepositModal
-          profile={profile}
-          lang={lang}
-          defaultFromName="Owner (Ashok)"
-          onClose={() => setShowOwnerDeposit(false)}
-          onSuccess={() => {
-            setShowOwnerDeposit(false)
             onRefresh()
           }}
         />
