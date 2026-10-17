@@ -42,7 +42,7 @@ import {
 import { supabase, type Category, type Deposit, type Expense, type Profile, type Role } from '@/lib/supabase'
 import { getTranslation, type Language } from '@/lib/i18n'
 import { compressImage, getSignedBillUrl, uploadBillPhoto } from '@/lib/image-compressor'
-import { exportToExcel, parseExcelFile, type ParsedExcelRow } from '@/lib/excel-import-export'
+import { exportToExcel, exportToPdf, parseExcelFile, type ParsedExcelRow } from '@/lib/excel-import-export'
 
 const DEFAULT_PROPERTY_ID = '00000000-0000-0000-0000-000000000001'
 
@@ -412,6 +412,7 @@ function SupervisorView({
   onRefresh,
   deferredPrompt,
   onPwaInstalled,
+  periodStartDate,
 }: {
   profile: Profile
   expenses: Expense[]
@@ -593,6 +594,7 @@ function AccountantView({
   onRefresh,
   deferredPrompt,
   onPwaInstalled,
+  periodStartDate,
 }: {
   profile: Profile
   expenses: Expense[]
@@ -896,6 +898,7 @@ function OwnerView({
   onRefresh,
   deferredPrompt,
   onPwaInstalled,
+  periodStartDate,
 }: {
   profile: Profile
   expenses: Expense[]
@@ -1355,6 +1358,23 @@ function LedgerScreen({
     )
   }
 
+  // Download .pdf Report (6 columns)
+  const handleDownloadPdf = () => {
+    exportToPdf(
+      rows.map((r) => ({
+        date: formatDate(r.date),
+        particular: r.particular,
+        expense: r.expense,
+        income: r.income,
+        deposit: r.deposit,
+        balance: r.balance,
+      })),
+      openingBalance,
+      'Thoppu Farm Ledger Report',
+      `thoppu-ledger-${new Date().toISOString().slice(0, 10)}.pdf`
+    )
+  }
+
   return (
     <div className="pb-8">
       <div className="mb-4 flex items-center justify-between">
@@ -1478,32 +1498,38 @@ function LedgerScreen({
       </div>
 
       {/* Export / Import & Add Deposit Action Buttons */}
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        <button onClick={handleDownloadExcel} className="secondary-button text-xs">
-          <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
-          {getTranslation(lang, 'exportExcel')}
-        </button>
-        <button onClick={handleDownloadCSV} className="secondary-button text-xs">
-          <ArrowDownToLine className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
-          {getTranslation(lang, 'downloadCSV')}
-        </button>
+      <div className="mb-4 space-y-2">
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={handleDownloadPdf} className="secondary-button text-xs !px-1.5 justify-center">
+            <FileText className="size-4 text-[#1f5f46] dark:text-[#35b586] shrink-0" />
+            PDF
+          </button>
+          <button onClick={handleDownloadExcel} className="secondary-button text-xs !px-1.5 justify-center">
+            <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586] shrink-0" />
+            Excel
+          </button>
+          <button onClick={handleDownloadCSV} className="secondary-button text-xs !px-1.5 justify-center">
+            <ArrowDownToLine className="size-4 text-[#1f5f46] dark:text-[#35b586] shrink-0" />
+            CSV
+          </button>
+        </div>
         {accountant && (
-          <>
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setShowRecordDeposit(true)}
-              className="primary-button !min-h-[40px] text-xs"
+              className="primary-button !min-h-[40px] text-xs justify-center"
             >
               <Plus className="size-4" />
               + Record Deposit
             </button>
             <button
               onClick={() => setShowImportModal(true)}
-              className="secondary-button !min-h-[40px] text-xs border-dashed"
+              className="secondary-button !min-h-[40px] text-xs border-dashed justify-center"
             >
               <Upload className="size-4" />
               {getTranslation(lang, 'importExcel')}
             </button>
-          </>
+          </div>
         )}
       </div>
 
@@ -1794,6 +1820,7 @@ function SettingsView({
   owner,
   deferredPrompt,
   onPwaInstalled,
+  periodStartDate,
 }: {
   profile: Profile
   openingBalance: number
@@ -1915,6 +1942,61 @@ function SettingsView({
     await supabase.from('settings').update({ opening_balance: val }).eq('property_id', DEFAULT_PROPERTY_ID)
     setEditingBal(false)
     onRefresh()
+  }
+
+  // Generate full closing ledger rows for PDF & Excel archiving
+  const getClosingLedgerRows = () => {
+    const items: Array<{
+      date: string
+      particular: string
+      expense: number
+      income: number
+      deposit: number
+    }> = []
+
+    // 1. Confirmed active deposits
+    for (const d of (activeDeposits || [])) {
+      if (d.status === 'Confirmed') {
+        const from = d.from_name ? d.from_name : 'Owner'
+        const ref = d.reference ? ` · ${d.reference}` : ''
+        items.push({
+          date: formatDate(d.date),
+          particular: `${from}${ref} (${d.mode})`,
+          expense: 0,
+          income: 0,
+          deposit: Number(d.amount),
+        })
+      }
+    }
+
+    // 2. Active expenses and salaries
+    for (const e of (activeExpenses || [])) {
+      const cat = (categories || []).find((c) => c.id === e.category_id)
+      const catName = cat?.name || 'Expense'
+      const particular = e.note ? `${catName} (${e.note})` : catName
+      const isIncome = catName.toLowerCase().includes('salary') || catName.toLowerCase().includes('income')
+
+      items.push({
+        date: formatDate(e.date),
+        particular,
+        expense: isIncome ? 0 : Number(e.amount),
+        income: isIncome ? Number(e.amount) : 0,
+        deposit: 0,
+      })
+    }
+
+    // Sort chronologically ascending
+    items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+    // Running balance
+    let running = openingBalance
+    return items.map((item) => {
+      running = running + item.deposit - item.expense - item.income
+      return {
+        ...item,
+        balance: running,
+      }
+    })
   }
 
   const handleApplyRollover = async () => {
@@ -2610,32 +2692,45 @@ function SettingsView({
               </span>
             </label>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  exportToExcel(
-                    (expenses || []).map((e) => ({
-                      date: formatDate(e.date),
-                      particular: e.note || 'Expense',
-                      expense: Number(e.amount),
-                      deposit: 0,
-                      balance: 0,
-                    })),
-                    openingBalance,
-                    `thoppu-ledger-closing-${new Date().toISOString().slice(0, 10)}.xlsx`
-                  )
-                }}
-                className="secondary-button flex-1 !min-h-[40px] text-xs"
-              >
-                <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
-                Archive Excel
-              </button>
+            <div className="space-y-2 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rows = getClosingLedgerRows()
+                    exportToPdf(
+                      rows,
+                      openingBalance,
+                      'Thoppu Farm - Period Closing Ledger',
+                      `thoppu-closing-${new Date().toISOString().slice(0, 10)}.pdf`
+                    )
+                  }}
+                  className="secondary-button !min-h-[40px] text-xs justify-center"
+                >
+                  <FileText className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+                  Download PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rows = getClosingLedgerRows()
+                    exportToExcel(
+                      rows,
+                      openingBalance,
+                      `thoppu-closing-${new Date().toISOString().slice(0, 10)}.xlsx`
+                    )
+                  }}
+                  className="secondary-button !min-h-[40px] text-xs justify-center"
+                >
+                  <FileSpreadsheet className="size-4 text-[#1f5f46] dark:text-[#35b586]" />
+                  Archive Excel
+                </button>
+              </div>
               <button
                 type="button"
                 disabled={rolloverLoading}
                 onClick={handleApplyRollover}
-                className="primary-button flex-1 !min-h-[40px] text-xs whitespace-nowrap"
+                className="primary-button w-full !min-h-[40px] text-xs whitespace-nowrap justify-center"
               >
                 {rolloverLoading ? 'Applying...' : 'Apply & Start Fresh'}
               </button>

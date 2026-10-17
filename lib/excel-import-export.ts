@@ -1,4 +1,6 @@
 import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { type Category } from './supabase'
 
 export interface ParsedExcelRow {
@@ -219,6 +221,22 @@ export function exportToExcel(
     ])
   }
 
+  // Append summary row
+  const totalExpense = rows.reduce((s, r) => s + (Number(r.expense) || 0), 0)
+  const totalIncome = rows.reduce((s, r) => s + (Number(r.income) || 0), 0)
+  const totalDeposit = rows.reduce((s, r) => s + (Number(r.deposit) || 0), 0)
+  const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance
+
+  excelData.push(['', '', '', '', '', ''])
+  excelData.push([
+    'TOTAL',
+    'Net Period Summary',
+    totalExpense > 0 ? (totalExpense as any) : '',
+    totalIncome > 0 ? (totalIncome as any) : '',
+    totalDeposit > 0 ? (totalDeposit as any) : '',
+    closingBalance as any,
+  ])
+
   const ws = XLSX.utils.aoa_to_sheet(excelData)
 
   // Auto-width columns for 6 columns
@@ -233,4 +251,101 @@ export function exportToExcel(
 
   XLSX.utils.book_append_sheet(wb, ws, 'Ledger')
   XLSX.writeFile(wb, filename)
+}
+
+/**
+ * Export running ledger to professionally styled PDF document
+ */
+export function exportToPdf(
+  rows: Array<{
+    date: string
+    particular: string
+    expense: number
+    income?: number
+    deposit?: number
+    balance: number
+  }>,
+  openingBalance: number,
+  title = 'Thoppu Farm Ledger Report',
+  filename = 'thoppu-ledger.pdf'
+) {
+  const doc = new jsPDF()
+
+  // Title & Metadata
+  doc.setFontSize(16)
+  doc.setTextColor(31, 95, 70) // #1f5f46
+  doc.text(title, 14, 18)
+
+  doc.setFontSize(9)
+  doc.setTextColor(110, 120, 115)
+  doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`, 14, 25)
+  doc.text(`Starting Balance: Rs. ${Number(openingBalance).toLocaleString('en-IN')}`, 14, 30)
+
+  // Calculations for summary
+  const totalExpense = rows.reduce((s, r) => s + (Number(r.expense) || 0), 0)
+  const totalIncome = rows.reduce((s, r) => s + (Number(r.income) || 0), 0)
+  const totalDeposit = rows.reduce((s, r) => s + (Number(r.deposit) || 0), 0)
+  const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance
+
+  const tableData: any[][] = [
+    [
+      new Date().toISOString().slice(0, 10),
+      'Opening Starting Balance',
+      '-',
+      '-',
+      '-',
+      `Rs. ${Number(openingBalance).toLocaleString('en-IN')}`,
+    ],
+  ]
+
+  for (const r of rows) {
+    tableData.push([
+      r.date,
+      r.particular,
+      r.expense > 0 ? `Rs. ${Number(r.expense).toLocaleString('en-IN')}` : '-',
+      r.income && r.income > 0 ? `Rs. ${Number(r.income).toLocaleString('en-IN')}` : '-',
+      r.deposit && r.deposit > 0 ? `Rs. ${Number(r.deposit).toLocaleString('en-IN')}` : '-',
+      `Rs. ${Number(r.balance).toLocaleString('en-IN')}`,
+    ])
+  }
+
+  // Summary Row
+  tableData.push([
+    'TOTAL',
+    'Net Period Summary',
+    `Rs. ${totalExpense.toLocaleString('en-IN')}`,
+    totalIncome > 0 ? `Rs. ${totalIncome.toLocaleString('en-IN')}` : '-',
+    `Rs. ${totalDeposit.toLocaleString('en-IN')}`,
+    `Rs. ${Number(closingBalance).toLocaleString('en-IN')}`,
+  ])
+
+  autoTable(doc, {
+    startY: 36,
+    head: [['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance']],
+    body: tableData,
+    headStyles: {
+      fillColor: [31, 95, 70],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    styles: {
+      fontSize: 8,
+      cellPadding: 2.5,
+      textColor: [30, 40, 35],
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 247],
+    },
+    columnStyles: {
+      0: { cellWidth: 26 },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 26, halign: 'right' },
+      3: { cellWidth: 24, halign: 'right' },
+      4: { cellWidth: 26, halign: 'right' },
+      5: { cellWidth: 28, halign: 'right' },
+    },
+  })
+
+  doc.save(filename)
 }
