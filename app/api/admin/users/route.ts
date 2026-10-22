@@ -205,24 +205,32 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
     }
 
-    // Check if target user has recorded expenses
-    const { count, error: expErr } = await supabaseAdmin
+    // Check if target user has recorded expenses or deposits
+    const { count: expCount, error: expErr } = await supabaseAdmin
       .from('expenses')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
 
     if (expErr) throw expErr
 
-    if (count && count > 0) {
+    const { count: depCount, error: depErr } = await supabaseAdmin
+      .from('deposits')
+      .select('id', { count: 'exact', head: true })
+      .eq('recorded_by', userId)
+
+    if (depErr) throw depErr
+
+    const totalRecords = (expCount || 0) + (depCount || 0)
+    if (totalRecords > 0) {
       return NextResponse.json(
         {
-          error: `Cannot permanently delete this member because they are linked to ${count} recorded expense(s) in your farm ledger. Please Deactivate them instead to preserve historical records.`,
+          error: `Cannot permanently delete this member because they are linked to ${totalRecords} recorded transaction(s) in your farm ledger. Please Deactivate them instead to preserve historical records.`,
         },
         { status: 400 }
       )
     }
 
-    // Safe to delete (0 expenses linked)
+    // Safe to delete (0 linked transactions)
     await supabaseAdmin.from('profiles').delete().eq('id', userId)
     await supabaseAdmin.auth.admin.deleteUser(userId)
 

@@ -1926,22 +1926,40 @@ function SettingsView({
   }
 
   useEffect(() => {
+    setNewName(profile.name)
+  }, [profile.name])
+
+  useEffect(() => {
+    setNewBal(openingBalance.toString())
+  }, [openingBalance])
+
+  useEffect(() => {
     loadTeamMembers()
   }, [accountant])
 
   const handleUpdateName = async () => {
     if (!newName.trim()) return
-    await supabase.from('profiles').update({ name: newName.trim() }).eq('id', profile.id)
-    setEditingName(false)
-    onRefresh()
+    try {
+      const { error } = await supabase.from('profiles').update({ name: newName.trim() }).eq('id', profile.id)
+      if (error) throw error
+      setEditingName(false)
+      onRefresh()
+    } catch (err: any) {
+      alert('Error updating name: ' + (err.message || err))
+    }
   }
 
   const handleUpdateBalance = async () => {
     const val = parseFloat(newBal)
     if (isNaN(val)) return
-    await supabase.from('settings').update({ opening_balance: val }).eq('property_id', DEFAULT_PROPERTY_ID)
-    setEditingBal(false)
-    onRefresh()
+    try {
+      const { error } = await supabase.from('settings').update({ opening_balance: val }).eq('property_id', DEFAULT_PROPERTY_ID)
+      if (error) throw error
+      setEditingBal(false)
+      onRefresh()
+    } catch (err: any) {
+      alert('Error updating balance: ' + (err.message || err))
+    }
   }
 
   // Generate full closing ledger rows for PDF & Excel archiving
@@ -2028,20 +2046,30 @@ function SettingsView({
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return
-    await supabase.from('categories').insert({
-      property_id: DEFAULT_PROPERTY_ID,
-      name: newCatName.trim(),
-      type: newCatType,
-      active: true,
-    })
-    setNewCatName('')
-    setShowAddCat(false)
-    onRefresh()
+    try {
+      const { error } = await supabase.from('categories').insert({
+        property_id: DEFAULT_PROPERTY_ID,
+        name: newCatName.trim(),
+        type: newCatType,
+        active: true,
+      })
+      if (error) throw error
+      setNewCatName('')
+      setShowAddCat(false)
+      onRefresh()
+    } catch (err: any) {
+      alert('Error adding category: ' + (err.message || err))
+    }
   }
 
   const handleToggleCategory = async (cat: Category) => {
-    await supabase.from('categories').update({ active: !cat.active }).eq('id', cat.id)
-    onRefresh()
+    try {
+      const { error } = await supabase.from('categories').update({ active: !cat.active }).eq('id', cat.id)
+      if (error) throw error
+      onRefresh()
+    } catch (err: any) {
+      alert('Error updating category status: ' + (err.message || err))
+    }
   }
 
   const handleDeleteCategory = async (cat: Category) => {
@@ -2607,7 +2635,10 @@ function SettingsView({
                     {p.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    <p className={`font-semibold truncate ${p.is_banned ? 'line-through text-muted-foreground' : 'text-[#18221c] dark:text-[#f2f5f3]'}`}>{p.name}</p>
+                    <p className={`font-semibold truncate ${p.is_banned ? 'line-through text-muted-foreground' : 'text-[#18221c] dark:text-[#f2f5f3]'}`}>
+                      {p.name}
+                      {p.id === profile.id && <span className="ml-1 text-[10px] font-normal text-muted-foreground">(You)</span>}
+                    </p>
                     <p className="text-[10px] text-muted-foreground truncate">@{p.username}</p>
                   </div>
                 </div>
