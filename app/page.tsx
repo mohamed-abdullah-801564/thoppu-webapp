@@ -1959,10 +1959,13 @@ function SettingsView({
     window.addEventListener('appinstalled', () => setIsInstalled(true))
   }, [])
 
-  // Category creation
+  // Category creation & editing
   const [showAddCat, setShowAddCat] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [newCatType, setNewCatType] = useState<'Farm' | 'Personal'>('Farm')
+  const [editingCat, setEditingCat] = useState<Category | null>(null)
+  const [editCatName, setEditCatName] = useState('')
+  const [editCatType, setEditCatType] = useState<'Farm' | 'Personal'>('Farm')
 
   // Password update (any user / supervisor)
   const [showPasswordChange, setShowPasswordChange] = useState(false)
@@ -2135,6 +2138,32 @@ function SettingsView({
       onRefresh()
     } catch (err: any) {
       alert('Error adding category: ' + (err.message || err))
+    }
+  }
+
+  const handleStartEditCategory = (cat: Category) => {
+    setEditingCat(cat)
+    setEditCatName(cat.name)
+    setEditCatType(cat.type)
+  }
+
+  const handleSaveEditCategory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingCat || !editCatName.trim()) return
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .update({
+          name: editCatName.trim(),
+          type: editCatType,
+        })
+        .eq('id', editingCat.id)
+
+      if (error) throw error
+      setEditingCat(null)
+      onRefresh()
+    } catch (err: any) {
+      alert('Error updating category: ' + (err.message || err))
     }
   }
 
@@ -2612,6 +2641,12 @@ function SettingsView({
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    onClick={() => handleStartEditCategory(c)}
+                    className="text-[11px] font-semibold text-[#1f5f46] dark:text-[#35b586] hover:underline px-1 py-0.5"
+                  >
+                    Edit
+                  </button>
+                  <button
                     onClick={() => handleToggleCategory(c)}
                     className="text-[11px] font-semibold text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded"
                   >
@@ -2928,6 +2963,47 @@ function SettingsView({
               {getTranslation(lang, 'close')}
             </button>
           </div>
+        </Modal>
+      )}
+
+      {/* EDIT CATEGORY MODAL */}
+      {editingCat && (
+        <Modal title="Edit Category" onClose={() => setEditingCat(null)}>
+          <form onSubmit={handleSaveEditCategory} className="form-stack">
+            <label>
+              <span>Category Name</span>
+              <input
+                value={editCatName}
+                onChange={(e) => setEditCatName(e.target.value)}
+                placeholder="e.g. Kadalai work, Thopu Bill"
+                required
+              />
+            </label>
+
+            <label>
+              <span>Category Type</span>
+              <select
+                value={editCatType}
+                onChange={(e) => setEditCatType(e.target.value as 'Farm' | 'Personal')}
+              >
+                <option value="Farm">Farm Expense</option>
+                <option value="Personal">Personal Expense</option>
+              </select>
+            </label>
+
+            <div className="flex gap-2 pt-2">
+              <button type="submit" className="primary-button flex-1">
+                Save Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingCat(null)}
+                className="secondary-button"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>
