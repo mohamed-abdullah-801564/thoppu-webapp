@@ -63,6 +63,17 @@ function formatDate(dateString: string) {
   return dateString
 }
 
+function formatLedgerDate(dateString: string) {
+  if (!dateString) return ''
+  const [y, m, d] = dateString.split('-')
+  if (!d || !m || !y) return dateString
+  const currentYear = new Date().getFullYear().toString()
+  if (y !== currentYear) {
+    return `${d}.${m}.${y.slice(2)}`
+  }
+  return `${d}.${m}`
+}
+
 function Icon({ name, className = '' }: { name: string; className?: string }) {
   const icons: Record<string, any> = { Home, ClipboardList, Wallet, Settings, Users, Tag, BarChart3, FileText }
   const Component = icons[name] || Home
@@ -615,6 +626,7 @@ function AccountantView({
   const [selected, setSelected] = useState<Expense | null>(null)
   const [showDeposit, setShowDeposit] = useState(false)
   const [showDirectExpense, setShowDirectExpense] = useState(false)
+  const [showAllCategories, setShowAllCategories] = useState(false)
 
   // Core rule: Balance = Opening Balance + Confirmed deposits - ALL expenses (current period)
   const activeDeposits = useMemo(() => {
@@ -632,7 +644,6 @@ function AccountantView({
   const currentBalance = openingBalance + confirmedDeposits - allExpensesSum
 
   const pendingExpenses = expenses.filter((e) => e.status === 'Submitted')
-  const pendingDeposits = deposits.filter((d) => d.status === 'Sent (pending)')
 
   const recent = [...expenses].slice(0, 5)
 
@@ -664,13 +675,13 @@ function AccountantView({
                 </div>
               </button>
 
-              <button onClick={() => setShowDeposit(true)} className="text-left">
+              <button onClick={() => setTab('ledger')} className="text-left">
                 <div className="metric-card">
                   <div className="metric-icon green">
-                    <ArrowDownToLine />
+                    <FileText />
                   </div>
-                  <p className="mt-4 text-2xl font-bold">{pendingDeposits.length}</p>
-                  <p className="text-xs leading-4 text-muted-foreground">{getTranslation(lang, 'pendingDeposits')}</p>
+                  <p className="mt-4 text-2xl font-bold">{expenses.length + deposits.filter((d) => d.status === 'Confirmed').length}</p>
+                  <p className="text-xs leading-4 text-muted-foreground">Cash Book (All Entries)</p>
                 </div>
               </button>
             </div>
@@ -697,41 +708,6 @@ function AccountantView({
                 <span>{getTranslation(lang, 'ledger')}</span>
               </button>
             </div>
-
-            {pendingDeposits.length > 0 && (
-              <>
-                <div className="section-heading">
-                  <h3>{getTranslation(lang, 'pendingDeposits')}</h3>
-                </div>
-                <div className="card-list">
-                  {pendingDeposits.map((d) => (
-                    <div key={d.id} className="entry-row justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold">{d.from_name || 'Owner deposit'}</p>
-                          <StatusBadge status={d.status} />
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {formatDate(d.date)} · {d.mode} {d.reference && `· ${d.reference}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Amount value={Number(d.amount)} />
-                        <button
-                          onClick={async () => {
-                            await supabase.from('deposits').update({ status: 'Confirmed' }).eq('id', d.id)
-                            onRefresh()
-                          }}
-                          className="primary-button !min-h-[32px] !py-1 !px-2.5 !text-xs whitespace-nowrap"
-                        >
-                          <Check className="size-3.5" /> Confirm
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
 
             <div className="section-heading">
               <h3>{getTranslation(lang, 'recentActivity')}</h3>
@@ -877,6 +853,54 @@ function AccountantView({
           }}
         />
       )}
+
+      {/* ALL CATEGORIES QUICK-ACCESS MODAL */}
+      {showAllCategories && (
+        <Modal title="Farm Categories" onClose={() => setShowAllCategories(false)}>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+            <p className="text-xs text-muted-foreground pb-1">
+              Active categories for logging farm receipts and expenses:
+            </p>
+            {categories.filter((c) => c.active).map((c) => {
+              const count = expenses.filter((e) => e.category_id === c.id).length
+              const total = expenses.filter((e) => e.category_id === c.id).reduce((s, e) => s + Number(e.amount), 0)
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => {
+                    setShowAllCategories(false)
+                    setTab('ledger')
+                  }}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-[#f8faf7] dark:bg-[#1a251f] text-xs cursor-pointer hover:bg-[#eef4ef] transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0 pr-2">
+                    <span className={`dot shrink-0 ${c.type === 'Personal' ? 'personal' : ''}`} />
+                    <div>
+                      <span className="font-semibold truncate text-[#18221c] dark:text-[#f2f5f3] block">{c.name}</span>
+                      <span className="text-[10px] text-muted-foreground">{count} {count === 1 ? 'entry' : 'entries'}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-[#1f5f46] dark:text-[#35b586] block">{formatCurrency(total)}</span>
+                    <span className={`badge shrink-0 !text-[9px] ${c.type === 'Personal' ? 'badge-amber' : 'badge-green'}`}>
+                      {c.type}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+            <button
+              onClick={() => {
+                setShowAllCategories(false)
+                setTab('ledger')
+              }}
+              className="primary-button w-full !min-h-[36px] text-xs mt-2"
+            >
+              Open Full Cash Book (All Entries)
+            </button>
+          </div>
+        </Modal>
+      )}
     </main>
   )
 }
@@ -916,7 +940,6 @@ function OwnerView({
   periodStartDate?: string | null
 }) {
   const [tab, setTab] = useState('home')
-  const [showSend, setShowSend] = useState(false)
   const [selected, setSelected] = useState<Expense | null>(null)
   const [typeFilter, setTypeFilter] = useState<'All' | 'Farm' | 'Personal'>('All')
 
@@ -1012,12 +1035,7 @@ function OwnerView({
               </div>
             </div>
 
-            <button onClick={() => setShowSend(true)} className="primary-button mt-5 w-full">
-              <ArrowUpFromLine className="size-5" />
-              {getTranslation(lang, 'iSentMoney')}
-            </button>
-
-            <div className="section-heading">
+            <div className="section-heading mt-4">
               <h3>{getTranslation(lang, 'expenseFeed')}</h3>
               <button onClick={() => setTab('feed')}>
                 View all <ChevronRight className="size-4" />
@@ -1067,6 +1085,7 @@ function OwnerView({
           <SettingsView
             profile={profile}
             openingBalance={openingBalance}
+            categories={categories}
             expenses={expenses}
             deposits={deposits}
             lang={lang}
@@ -1083,19 +1102,6 @@ function OwnerView({
       </div>
 
       <BottomNav role="owner" active={tab} onChange={setTab} lang={lang} />
-
-      {showSend && (
-        <DepositModal
-          profile={profile}
-          lang={lang}
-          owner
-          onClose={() => setShowSend(false)}
-          onSuccess={() => {
-            setShowSend(false)
-            onRefresh()
-          }}
-        />
-      )}
 
       {selected && (
         <ExpenseDetailModal
@@ -1125,6 +1131,8 @@ function EditDepositModal({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const [date, setDate] = useState(deposit.date)
+  const [amount, setAmount] = useState(deposit.amount.toString())
   const [fromName, setFromName] = useState(deposit.from_name || '')
   const [reference, setReference] = useState(deposit.reference || '')
   const [mode, setMode] = useState(deposit.mode)
@@ -1132,18 +1140,31 @@ function EditDepositModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const numAmount = parseFloat(amount)
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid amount')
+      return
+    }
     setSaving(true)
     try {
       const { error } = await supabase
         .from('deposits')
         .update({
+          date,
+          amount: numAmount,
           from_name: fromName.trim() || null,
           reference: reference.trim() || null,
           mode,
         })
         .eq('id', deposit.id)
 
-      if (error) throw error
+      if (error) {
+        if (error.message?.includes('Locked')) {
+          alert('Database trigger active. Please run the 1-click SQL in supabase/allow-accountant-editing.sql in your Supabase Dashboard to enable full editing permissions.')
+          return
+        }
+        throw error
+      }
       onSuccess()
     } catch (err: any) {
       alert(`Error updating deposit: ${err.message}`)
@@ -1152,21 +1173,55 @@ function EditDepositModal({
     }
   }
 
+  const handleDelete = async () => {
+    if (!confirm(lang === 'ta' ? 'இந்த வைப்புத்தொகையை நிச்சயமாக நீக்க விரும்புகிறீர்களா?' : 'Are you sure you want to permanently delete this deposit?')) return
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('deposits').delete().eq('id', deposit.id)
+      if (error) {
+        if (error.message?.includes('Locked')) {
+          alert('Database trigger active. Please run the 1-click SQL in supabase/allow-accountant-editing.sql in your Supabase Dashboard to enable full editing permissions.')
+          return
+        }
+        throw error
+      }
+      onSuccess()
+    } catch (err: any) {
+      alert(`Error deleting deposit: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <Modal title="Edit Deposit Particulars" onClose={onClose}>
+    <Modal title="Edit Deposit" onClose={onClose}>
       <form onSubmit={handleSave} className="form-stack">
-        <div className="p-3 rounded-xl bg-[#f2f6f3] dark:bg-[#151e18] mb-1">
-          <p className="text-xs text-muted-foreground">Amount (Protected for audit)</p>
-          <p className="text-xl font-bold text-[#1f5f46] dark:text-[#35b586]">{formatCurrency(Number(deposit.amount))}</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">Date: {formatDate(deposit.date)}</p>
-        </div>
+        <label>
+          <span>Date</span>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+        </label>
+
+        <label>
+          <span>Amount (₹)</span>
+          <input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </label>
 
         <label>
           <span>Source / Deposit Type</span>
           <input
             value={fromName}
             onChange={(e) => setFromName(e.target.value)}
-            placeholder="e.g. Owner Deposit (Ashok), Coconut Harvest Sale"
+            placeholder="e.g. Owner Deposit, Coconut Harvest Sale"
           />
         </label>
 
@@ -1188,9 +1243,20 @@ function EditDepositModal({
           />
         </label>
 
-        <button type="submit" disabled={saving} className="primary-button mt-2">
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
+        <div className="flex gap-2 pt-2">
+          <button type="submit" disabled={saving} className="primary-button flex-1">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleDelete}
+            className="secondary-button !border-destructive/40 text-destructive hover:bg-destructive/10 !px-3"
+            title="Delete Deposit"
+          >
+            Delete
+          </button>
+        </div>
       </form>
     </Modal>
   )
@@ -1219,6 +1285,7 @@ function LedgerScreen({
 }) {
   const [periodMode, setPeriodMode] = useState<'current' | 'all'>('current')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
+  const [searchQuery, setSearchQuery] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
@@ -1227,11 +1294,9 @@ function LedgerScreen({
   const [selectedDeposit, setSelectedDeposit] = useState<Deposit | null>(null)
 
   // Pending deposits check
-  const pendingDeposits = useMemo(() => {
-    return deposits.filter((d) => d.status === 'Sent (pending)')
-  }, [deposits])
+  // Build sorted chronological entries (5 Columns: Date, Particular, Expense, Income, Balance)
+  const isFiltered = categoryFilter !== 'ALL' || searchQuery.trim() !== ''
 
-  // Build sorted chronological entries:
   const rows = useMemo(() => {
     type LedgerRow = {
       id: string
@@ -1240,17 +1305,16 @@ function LedgerScreen({
       particular: string
       expense: number
       income: number
-      deposit: number
       category_id?: string
-      type: 'opening' | 'deposit' | 'expense' | 'income'
+      type: 'deposit' | 'expense'
     }
 
     const items: LedgerRow[] = []
 
-    // 1. Confirmed deposits (Owner capital injections: 50k, 1L, etc.)
+    // 1. Confirmed deposits (Owner capital injections: 50k, 1L, etc.) -> Recorded in Income column
     for (const d of deposits) {
       if (d.status === 'Confirmed') {
-        const from = d.from_name ? d.from_name : 'Owner'
+        const from = d.from_name ? d.from_name : 'Owner Deposit'
         const ref = d.reference ? ` · ${d.reference}` : ''
         const particular = `${from}${ref} (${d.mode})`
         items.push({
@@ -1259,35 +1323,39 @@ function LedgerScreen({
           created_at: d.created_at,
           particular,
           expense: 0,
-          income: 0,
-          deposit: Number(d.amount),
+          income: Number(d.amount),
           type: 'deposit',
         })
       }
     }
 
-    // 2. All expenses and staff incomes (Salaries / Payouts)
+    // 2. All expenses and staff payouts -> Recorded in Expense column
     for (const e of expenses) {
       const cat = categories.find((c) => c.id === e.category_id)
       const catName = cat?.name || 'Expense'
       const particular = e.note ? `${catName} (${e.note})` : catName
-      const isIncome = catName.toLowerCase().includes('salary') || catName.toLowerCase().includes('income')
 
       items.push({
         id: e.id,
         date: e.date,
         created_at: e.created_at,
         particular,
-        expense: isIncome ? 0 : Number(e.amount),
-        income: isIncome ? Number(e.amount) : 0,
-        deposit: 0,
+        expense: Number(e.amount),
+        income: 0,
         category_id: e.category_id,
-        type: isIncome ? 'income' : 'expense',
+        type: 'expense',
       })
     }
 
-    // Sort chronologically ascending
-    items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    // Sort chronologically ascending (oldest date first, deterministic secondary sort by created_at)
+    items.sort((a, b) => {
+      const dDiff = new Date(a.date).getTime() - new Date(b.date).getTime()
+      if (dDiff !== 0) return dDiff
+      if (a.created_at && b.created_at) {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      }
+      return 0
+    })
 
     // Filter
     let filtered = items
@@ -1297,6 +1365,10 @@ function LedgerScreen({
     if (categoryFilter !== 'ALL') {
       filtered = filtered.filter((r) => r.category_id === categoryFilter)
     }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      filtered = filtered.filter((r) => r.particular.toLowerCase().includes(q))
+    }
     if (startDate) {
       filtered = filtered.filter((r) => r.date >= startDate)
     }
@@ -1304,33 +1376,39 @@ function LedgerScreen({
       filtered = filtered.filter((r) => r.date <= endDate)
     }
 
-    // Calculate running balance row by row:
-    // Deposit adds to fund (+); Expense & Income (staff salary) reduce fund (-)
-    let running = openingBalance
+    // In full cash book: starts with openingBalance, calculates running cash-in-hand
+    // In filtered work/category ledger: starts at 0, calculates running total spent on this work
+    let running = isFiltered ? 0 : openingBalance
     return filtered.map((item) => {
-      running = running + item.deposit - item.expense - item.income
+      running = isFiltered ? running + item.expense + item.income : running + item.income - item.expense
       return {
         ...item,
         balance: running,
       }
     })
-  }, [expenses, deposits, categories, openingBalance, categoryFilter, startDate, endDate, periodMode, periodStartDate])
+  }, [expenses, deposits, categories, openingBalance, categoryFilter, searchQuery, isFiltered, startDate, endDate, periodMode, periodStartDate])
 
-  // Download CSV (6 columns)
+  // Download CSV (5 columns)
   const handleDownloadCSV = () => {
-    const headers = ['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance']
+    const headers = ['Date', 'Particular', 'Expense', 'Income', 'Balance']
     const csvRows = [headers.join(',')]
-    csvRows.push([formatDate(new Date().toISOString().slice(0, 10)), 'Opening Balance', '', '', '', openingBalance].join(','))
+    csvRows.push([formatDate(new Date().toISOString().slice(0, 10)), 'Opening Balance', '', '', openingBalance].join(','))
 
     for (const r of rows) {
       const dateStr = formatDate(r.date)
       const partStr = `"${r.particular.replace(/"/g, '""')}"`
       const expStr = r.expense > 0 ? r.expense : ''
       const incStr = r.income > 0 ? r.income : ''
-      const depStr = r.deposit > 0 ? r.deposit : ''
       const balStr = r.balance
-      csvRows.push([dateStr, partStr, expStr, incStr, depStr, balStr].join(','))
+      csvRows.push([dateStr, partStr, expStr, incStr, balStr].join(','))
     }
+
+    // Summary footer row
+    const totalExp = rows.reduce((s, r) => s + r.expense, 0)
+    const totalInc = rows.reduce((s, r) => s + r.income, 0)
+    const finalBal = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance
+    csvRows.push(['', '', '', '', ''].join(','))
+    csvRows.push(['TOTAL', '"Net Period Total"', totalExp > 0 ? totalExp : '', totalInc > 0 ? totalInc : '', finalBal].join(','))
 
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -1342,7 +1420,7 @@ function LedgerScreen({
     document.body.removeChild(link)
   }
 
-  // Download .xlsx Excel (6 columns)
+  // Download .xlsx Excel (5 columns)
   const handleDownloadExcel = () => {
     exportToExcel(
       rows.map((r) => ({
@@ -1350,7 +1428,6 @@ function LedgerScreen({
         particular: r.particular,
         expense: r.expense,
         income: r.income,
-        deposit: r.deposit,
         balance: r.balance,
       })),
       openingBalance,
@@ -1358,7 +1435,7 @@ function LedgerScreen({
     )
   }
 
-  // Download .pdf Report (6 columns)
+  // Download .pdf Report (5 columns)
   const handleDownloadPdf = () => {
     exportToPdf(
       rows.map((r) => ({
@@ -1366,7 +1443,6 @@ function LedgerScreen({
         particular: r.particular,
         expense: r.expense,
         income: r.income,
-        deposit: r.deposit,
         balance: r.balance,
       })),
       openingBalance,
@@ -1383,54 +1459,6 @@ function LedgerScreen({
           <p className="mt-1 text-sm text-muted-foreground">Running farm cash book & bank reconciliation</p>
         </div>
       </div>
-
-      {/* PENDING DEPOSITS ALERT BANNER */}
-      {pendingDeposits.length > 0 && (
-        <div className="mb-4 rounded-2xl bg-[#fff8eb] dark:bg-[#2a2115] border border-[#f5dfb8] dark:border-[#5a4220] p-4 text-xs">
-          <div className="flex items-start gap-2.5">
-            <IndianRupee className="size-5 text-[#b07817] dark:text-[#f3b749] shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-[#684405] dark:text-[#f7cb73] text-sm">
-                {pendingDeposits.length} Deposit{pendingDeposits.length > 1 ? 's' : ''} Awaiting Confirmation (₹{pendingDeposits.reduce((s, d) => s + Number(d.amount), 0).toLocaleString('en-IN')})
-              </p>
-              <p className="text-[#8d6215] dark:text-[#d3a95d] mt-0.5 text-[11px]">
-                Deposits remain pending until confirmed by the accountant so they can reflect in the cash book.
-              </p>
-              <div className="mt-2.5 space-y-1.5">
-                {pendingDeposits.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex items-center justify-between gap-3 p-2 rounded-xl bg-white/90 dark:bg-[#1a150e]/90 border border-[#f5dfb8] dark:border-[#423118]"
-                  >
-                    <div className="truncate">
-                      <span className="font-bold text-[#18221c] dark:text-[#f2f5f3]">
-                        {d.from_name || 'Owner'}
-                      </span>
-                      <span className="text-muted-foreground ml-1.5 text-[11px]">
-                        · {d.mode} {d.reference ? `(${d.reference})` : ''}
-                      </span>
-                      <span className="ml-2 font-bold text-[#1f5f46] dark:text-[#35b586]">
-                        {formatCurrency(Number(d.amount))}
-                      </span>
-                    </div>
-                    {accountant && (
-                      <button
-                        onClick={async () => {
-                          await supabase.from('deposits').update({ status: 'Confirmed' }).eq('id', d.id)
-                          onRefresh?.()
-                        }}
-                        className="primary-button !min-h-[28px] !py-0.5 !px-3 !text-[11px] whitespace-nowrap shadow-sm shrink-0"
-                      >
-                        <Check className="size-3" /> Confirm
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Period Filter Selector: Current Period vs Full Archive */}
       {periodStartDate && (
@@ -1456,6 +1484,43 @@ function LedgerScreen({
             }`}
           >
             Full Archive (All Time)
+          </button>
+        </div>
+      )}
+
+      {/* Search Input for Work / Particulars */}
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search work or note (e.g. kadalai, sand, diesel, thopu)..."
+          className="w-full pl-9 pr-8 py-2 rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] text-xs bg-white dark:bg-[#151e18]"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+
+      {isFiltered && (
+        <div className="mb-3 p-2 rounded-xl bg-[#e8f3eb] dark:bg-[#1a2d22] border border-[#35b586]/30 flex items-center justify-between text-xs">
+          <span className="font-semibold text-[#1f5f46] dark:text-[#35b586]">
+            Showing Category Ledger ({rows.length} {rows.length === 1 ? 'entry' : 'entries'})
+          </span>
+          <button
+            onClick={() => {
+              setCategoryFilter('ALL')
+              setSearchQuery('')
+            }}
+            className="text-[11px] font-bold text-destructive hover:underline"
+          >
+            Clear Filter (Show All)
           </button>
         </div>
       )}
@@ -1533,34 +1598,35 @@ function LedgerScreen({
         )}
       </div>
 
-      {/* Ledger Table (6 Columns: Date, Particular, Expense, Income, Deposit, Balance) */}
+      {/* Ledger Table (5 Columns: Date, Particular, Expense, Income, Balance) */}
       <div className="overflow-x-auto -mx-1 px-1">
         <div className="ledger-table min-w-[365px]">
-          <div className="ledger-head !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 text-[11px]">
+          <div className="ledger-head !grid-cols-[48px_1fr_60px_60px_68px] !gap-1.5 text-[11px]">
             <span>Date</span>
             <span>Particular</span>
             <span className="text-right text-destructive font-bold">Expense</span>
-            <span className="text-right text-blue-600 dark:text-blue-400 font-bold">Income</span>
-            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">Deposit</span>
-            <span className="text-right font-bold">Balance</span>
+            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">Income</span>
+            <span className="text-right font-bold">{isFiltered ? 'Total Spent' : 'Balance'}</span>
           </div>
 
-          {/* Opening balance row */}
-          <div className="ledger-row opening-row !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 font-semibold text-xs">
-            <span>—</span>
-            <span className="truncate text-[#1f5f46] dark:text-[#35b586]">Opening Balance</span>
-            <span className="text-right">—</span>
-            <span className="text-right">—</span>
-            <span className="text-right">—</span>
-            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">{formatCurrency(openingBalance)}</span>
-          </div>
+          {/* Opening balance row at top (Cash Book view only) */}
+          {!isFiltered && (
+            <div className="ledger-row opening-row !grid-cols-[48px_1fr_60px_60px_68px] !gap-1.5 font-semibold text-xs bg-[#f4f7f4] dark:bg-[#1a261f]">
+              <span>—</span>
+              <span className="truncate text-[#1f5f46] dark:text-[#35b586] font-bold">Opening Balance</span>
+              <span className="text-right text-muted-foreground">—</span>
+              <span className="text-right text-muted-foreground">—</span>
+              <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">{formatCurrency(openingBalance)}</span>
+            </div>
+          )}
 
-          {rows.slice().reverse().map((r) => (
+          {/* Chronological transaction rows (Date Order) */}
+          {rows.map((r) => (
             <div
               key={r.id}
               onClick={() => {
                 if (!accountant) return
-                if (r.type === 'expense' || r.type === 'income') {
+                if (r.type === 'expense') {
                   const exp = expenses.find((e) => e.id === r.id)
                   if (exp) setSelectedExpense(exp)
                 } else if (r.type === 'deposit') {
@@ -1568,25 +1634,39 @@ function LedgerScreen({
                   if (dep) setSelectedDeposit(dep)
                 }
               }}
-              className={`ledger-row !grid-cols-[46px_1fr_52px_52px_56px_58px] !gap-1 text-xs ${accountant ? 'cursor-pointer hover:bg-[#f5f8f5] dark:hover:bg-[#1a251f] transition-colors' : ''}`}
+              className={`ledger-row !grid-cols-[48px_1fr_60px_60px_68px] !gap-1.5 text-xs ${accountant ? 'cursor-pointer hover:bg-[#f5f8f5] dark:hover:bg-[#1a251f] transition-colors' : ''}`}
               title={accountant ? 'Click to inspect or edit details' : undefined}
             >
-              <span className="truncate text-muted-foreground">{formatDate(r.date).slice(0, 5)}</span>
+              <span className="truncate text-muted-foreground" title={r.date}>{formatLedgerDate(r.date)}</span>
               <span className="truncate font-medium">{r.particular}</span>
               <span className="text-right text-destructive font-semibold">
                 {r.expense > 0 ? formatCurrency(r.expense).replace('₹', '') : '—'}
               </span>
-              <span className="text-right text-blue-600 dark:text-blue-400 font-semibold">
+              <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-semibold">
                 {r.income > 0 ? formatCurrency(r.income).replace('₹', '') : '—'}
               </span>
-              <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-semibold">
-                {r.deposit > 0 ? formatCurrency(r.deposit).replace('₹', '') : '—'}
-              </span>
-              <span className="text-right font-bold">
+              <span className="text-right font-bold text-[#18221c] dark:text-[#f2f5f3]">
                 {formatCurrency(r.balance).replace('₹', '')}
               </span>
             </div>
           ))}
+
+          {/* Summary Footer with Total Expenses, Total Income, and Final Closing Balance */}
+          <div className="ledger-row closing-row !grid-cols-[48px_1fr_60px_60px_68px] !gap-1.5 font-bold text-xs bg-[#eef4ef] dark:bg-[#1c2c22] border-t-2 border-[#1f5f46]/30 mt-1">
+            <span>TOTAL</span>
+            <span className="truncate text-muted-foreground uppercase text-[10px]">
+              {isFiltered ? 'Filtered Total' : 'Net Period Total'}
+            </span>
+            <span className="text-right text-destructive font-bold">
+              {rows.reduce((s, r) => s + r.expense, 0) > 0 ? formatCurrency(rows.reduce((s, r) => s + r.expense, 0)).replace('₹', '') : '—'}
+            </span>
+            <span className="text-right text-[#1f5f46] dark:text-[#35b586] font-bold">
+              {rows.reduce((s, r) => s + r.income, 0) > 0 ? formatCurrency(rows.reduce((s, r) => s + r.income, 0)).replace('₹', '') : '—'}
+            </span>
+            <span className="text-right font-extrabold text-[#1f5f46] dark:text-[#35b586]">
+              {formatCurrency(isFiltered ? rows.reduce((s, r) => s + r.expense, 0) : (rows.length > 0 ? rows[rows.length - 1].balance : openingBalance)).replace('₹', '')}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1962,17 +2042,16 @@ function SettingsView({
     }
   }
 
-  // Generate full closing ledger rows for PDF & Excel archiving
+  // Generate full closing ledger rows for PDF & Excel archiving (5 Columns)
   const getClosingLedgerRows = () => {
     const items: Array<{
       date: string
       particular: string
       expense: number
       income: number
-      deposit: number
     }> = []
 
-    // 1. Confirmed active deposits
+    // 1. Confirmed active deposits -> Direct into Income column
     for (const d of (activeDeposits || [])) {
       if (d.status === 'Confirmed') {
         const from = d.from_name ? d.from_name : 'Owner'
@@ -1981,25 +2060,22 @@ function SettingsView({
           date: formatDate(d.date),
           particular: `${from}${ref} (${d.mode})`,
           expense: 0,
-          income: 0,
-          deposit: Number(d.amount),
+          income: Number(d.amount),
         })
       }
     }
 
-    // 2. Active expenses and salaries
+    // 2. Active expenses -> Strictly Expense column (including salaries)
     for (const e of (activeExpenses || [])) {
       const cat = (categories || []).find((c) => c.id === e.category_id)
       const catName = cat?.name || 'Expense'
       const particular = e.note ? `${catName} (${e.note})` : catName
-      const isIncome = catName.toLowerCase().includes('salary') || catName.toLowerCase().includes('income')
 
       items.push({
         date: formatDate(e.date),
         particular,
-        expense: isIncome ? 0 : Number(e.amount),
-        income: isIncome ? Number(e.amount) : 0,
-        deposit: 0,
+        expense: Number(e.amount),
+        income: 0,
       })
     }
 
@@ -2009,7 +2085,7 @@ function SettingsView({
     // Running balance
     let running = openingBalance
     return items.map((item) => {
-      running = running + item.deposit - item.expense - item.income
+      running = running + item.income - item.expense
       return {
         ...item,
         balance: running,
@@ -2876,7 +2952,8 @@ function AddExpenseModal({
   onClose: () => void
   onSuccess: () => void
 }) {
-  const [categoryId, setCategoryId] = useState(categories[0]?.id || '')
+  const activeCategories = categories.filter((c) => c.active)
+  const [categoryName, setCategoryName] = useState(activeCategories[0]?.name || 'Thopu Bill')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [note, setNote] = useState('')
@@ -2886,7 +2963,16 @@ function AddExpenseModal({
   const [compressing, setCompressing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const activeCategories = categories.filter((c) => c.active)
+  const quickCategories = [
+    'Kadalai work',
+    'Thopu Bill',
+    'Tractor / Machinery',
+    'Salary',
+    'Thenga selavu',
+    'Plants',
+    'Household',
+    'Other',
+  ]
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0]
@@ -2903,6 +2989,12 @@ function AddExpenseModal({
       return
     }
 
+    const trimmedCat = categoryName.trim()
+    if (!trimmedCat) {
+      alert('Please specify a category or work name')
+      return
+    }
+
     setSubmitting(true)
     let photoPath: string | null = null
 
@@ -2913,13 +3005,36 @@ function AddExpenseModal({
         setCompressing(false)
       }
 
+      // Check if category exists or create a new one automatically
+      let finalCatId = activeCategories.find((c) => c.name.toLowerCase() === trimmedCat.toLowerCase())?.id
+
+      if (!finalCatId) {
+        const isPersonal = trimmedCat.toLowerCase().includes('house') || trimmedCat.toLowerCase().includes('personal') || trimmedCat.toLowerCase().includes('dad')
+        const { data: newCat, error: catErr } = await supabase
+          .from('categories')
+          .insert({
+            property_id: DEFAULT_PROPERTY_ID,
+            name: trimmedCat,
+            type: isPersonal ? 'Personal' : 'Farm',
+            active: true,
+          })
+          .select()
+          .maybeSingle()
+
+        if (!catErr && newCat) {
+          finalCatId = newCat.id
+        } else {
+          finalCatId = activeCategories[0]?.id
+        }
+      }
+
       // Accountant direct entries post as Verified. Supervisor posts as Submitted.
       const status = directVerified ? 'Verified' : 'Submitted'
 
       const { error } = await supabase.from('expenses').insert({
         property_id: DEFAULT_PROPERTY_ID,
         user_id: profile.id,
-        category_id: categoryId || activeCategories[0]?.id,
+        category_id: finalCatId,
         amount: numAmount,
         date,
         note: note.trim() || null,
@@ -2942,19 +3057,43 @@ function AddExpenseModal({
     <Modal title={directVerified ? getTranslation(lang, 'addEntry') : getTranslation(lang, 'addExpense')} onClose={onClose}>
       <form onSubmit={handleSubmit} className="form-stack">
         <label>
-          <span>{getTranslation(lang, 'category')}</span>
-          <select
-            value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
+          <span>{getTranslation(lang, 'category')} / Work Name</span>
+          <input
+            list="farm-category-suggestions"
+            value={categoryName}
+            onChange={(e) => setCategoryName(e.target.value)}
+            placeholder="Type or select work (e.g. Kadalai work, Thopu Bill, Tractor)..."
             required
-          >
+            className="w-full rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-xs bg-white dark:bg-[#151e18]"
+          />
+          <datalist id="farm-category-suggestions">
             {activeCategories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.type})
-              </option>
+              <option key={c.id} value={c.name} />
             ))}
-          </select>
+            <option value="Kadalai work" />
+            <option value="Thenga selavu" />
+            <option value="Fertilizer / Uram" />
+            <option value="Diesel / Fuel" />
+          </datalist>
         </label>
+
+        {/* Quick tap chips for mobile speed */}
+        <div className="flex flex-wrap gap-1.5 pt-0.5 pb-1">
+          {quickCategories.map((qc) => (
+            <button
+              key={qc}
+              type="button"
+              onClick={() => setCategoryName(qc)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                categoryName.toLowerCase() === qc.toLowerCase()
+                  ? 'bg-[#1f5f46] text-white'
+                  : 'bg-[#edf3ee] dark:bg-[#1c2c22] text-[#2c3d31] dark:text-[#d2ded5] hover:bg-[#d8e6db]'
+              }`}
+            >
+              {qc}
+            </button>
+          ))}
+        </div>
 
         <label>
           <span>{getTranslation(lang, 'amount')}</span>
@@ -3203,12 +3342,20 @@ function ExpenseDetailModal({
   const [questionText, setQuestionText] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // Accountant edit mode
+  const isAccountant = accountant || profile.role === 'accountant'
+  const [isAccountantEditing, setIsAccountantEditing] = useState(false)
+  const [accDate, setAccDate] = useState(expense.date)
+  const [accCategoryId, setAccCategoryId] = useState(expense.category_id)
+  const [accNote, setAccNote] = useState(expense.note || '')
+  const [accAmount, setAccAmount] = useState(expense.amount.toString())
+
   // Resubmit state for supervisor
   const [isResubmitting, setIsResubmitting] = useState(false)
   const [editAmount, setEditAmount] = useState(expense.amount.toString())
   const [editNote, setEditNote] = useState(expense.note || '')
 
-  const cat = categories.find((c) => c.id === expense.category_id)
+  const cat = categories.find((c) => c.id === (isAccountantEditing ? accCategoryId : expense.category_id))
 
   useEffect(() => {
     if (expense.bill_photo_url) {
@@ -3254,6 +3401,63 @@ function ExpenseDetailModal({
     }
   }
 
+  // Accountant Save
+  const handleAccountantSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const num = parseFloat(accAmount)
+    if (isNaN(num) || num <= 0) {
+      alert('Please enter a valid amount')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .update({
+          date: accDate,
+          category_id: accCategoryId,
+          note: accNote.trim() || null,
+          amount: num,
+        })
+        .eq('id', expense.id)
+
+      if (error) {
+        if (error.message?.includes('Locked')) {
+          alert('Database trigger active. Please run the 1-click SQL in supabase/allow-accountant-editing.sql in your Supabase Dashboard to enable full editing permissions.')
+          return
+        }
+        throw error
+      }
+      setIsAccountantEditing(false)
+      onUpdated?.()
+    } catch (err: any) {
+      alert(`Error updating expense: ${err.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Accountant Delete
+  const handleAccountantDelete = async () => {
+    if (!confirm(lang === 'ta' ? 'இந்த செலவை நிச்சயமாக நீக்க விரும்புகிறீர்களா?' : 'Are you sure you want to permanently delete this expense?')) return
+    setSubmitting(true)
+    try {
+      const { error } = await supabase.from('expenses').delete().eq('id', expense.id)
+      if (error) {
+        if (error.message?.includes('Locked')) {
+          alert('Database trigger active. Please run the 1-click SQL in supabase/allow-accountant-editing.sql in your Supabase Dashboard to enable full editing permissions.')
+          return
+        }
+        throw error
+      }
+      onUpdated?.()
+    } catch (err: any) {
+      alert(`Error deleting expense: ${err.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   // Supervisor Resubmit
   const handleResubmit = async () => {
     const num = parseFloat(editAmount)
@@ -3278,131 +3482,218 @@ function ExpenseDetailModal({
     }
   }
 
-  const isLocked = expense.status === 'Verified'
+  const isLocked = expense.status === 'Verified' && !isAccountant
 
   return (
-    <Modal title={getTranslation(lang, 'expenseDetails')} onClose={onClose}>
+    <Modal title={isAccountantEditing ? 'Edit Expense' : getTranslation(lang, 'expenseDetails')} onClose={onClose}>
       <div className="form-stack">
-        <div className="detail-amount">
-          <p className="text-xs text-muted-foreground">{cat?.name || 'Expense'}</p>
-          <Amount value={Number(expense.amount)} large />
-        </div>
+        {isAccountantEditing ? (
+          <form onSubmit={handleAccountantSave} className="space-y-3">
+            <label>
+              <span>Date</span>
+              <input
+                type="date"
+                value={accDate}
+                onChange={(e) => setAccDate(e.target.value)}
+                required
+              />
+            </label>
 
-        <div className="detail-grid">
-          <div>
-            <span className="text-muted-foreground">Date</span>
-            <strong>{formatDate(expense.date)}</strong>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Status</span>
-            <StatusBadge status={expense.status} />
-          </div>
-        </div>
+            <label>
+              <span>Category</span>
+              <select
+                value={accCategoryId}
+                onChange={(e) => setAccCategoryId(e.target.value)}
+                required
+              >
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.type})
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        {expense.note && (
-          <div className="note-box">
-            <span className="text-xs text-muted-foreground block mb-1">Note</span>
-            <p className="text-sm font-medium">{expense.note}</p>
-          </div>
-        )}
+            <label>
+              <span>Work / Note Description</span>
+              <input
+                value={accNote}
+                onChange={(e) => setAccNote(e.target.value)}
+                placeholder="e.g. kadalai work, sand for thopu"
+              />
+            </label>
 
-        {/* Bill Image View */}
-        {signedPhotoUrl ? (
-          <div className="overflow-hidden rounded-2xl border border-[#d9dfd9] dark:border-[#2e4235]">
-            <a href={signedPhotoUrl} target="_blank" rel="noopener noreferrer">
-              <img src={signedPhotoUrl} alt="Bill full view" className="max-h-64 w-full object-cover" />
-            </a>
-          </div>
-        ) : (
-          <div className="bill-large">
-            <ImageIcon className="size-6 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">No bill image attached</span>
-          </div>
-        )}
+            <label>
+              <span>Amount (₹)</span>
+              <input
+                type="number"
+                value={accAmount}
+                onChange={(e) => setAccAmount(e.target.value)}
+                required
+                min="1"
+              />
+            </label>
 
-        {/* Query Message Box */}
-        {expense.query_message && (
-          <div className="query-box">
-            <p className="text-xs font-bold uppercase tracking-wide text-[#9b6a10]">
-              {getTranslation(lang, 'accountantQuestion')}
-            </p>
-            <p className="mt-1 text-sm">{expense.query_message}</p>
-          </div>
-        )}
-
-        {/* Locked badge */}
-        {isLocked && (
-          <div className="flex items-center justify-center gap-2 rounded-xl bg-[#eef1ee] dark:bg-[#1a2d22] p-2 text-xs font-semibold text-[#68736b] dark:text-[#7a8e80]">
-            <Lock className="size-3.5" />
-            <span>Entry verified and locked (cannot be edited)</span>
-          </div>
-        )}
-
-        {/* Supervisor resubmit edit mode */}
-        {profile.role === 'supervisor' && expense.status === 'Query' && (
-          <div>
-            {isResubmitting ? (
-              <div className="space-y-3 pt-2">
-                <label>
-                  <span>Amount</span>
-                  <input
-                    type="number"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>Note</span>
-                  <input
-                    value={editNote}
-                    onChange={(e) => setEditNote(e.target.value)}
-                  />
-                </label>
-                <button onClick={handleResubmit} disabled={submitting} className="primary-button w-full">
-                  {getTranslation(lang, 'submit')}
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setIsResubmitting(true)} className="primary-button w-full">
-                {getTranslation(lang, 'editResubmit')}
+            <div className="flex gap-2 pt-2">
+              <button type="submit" disabled={submitting} className="primary-button flex-1">
+                {submitting ? 'Saving...' : 'Save Changes'}
               </button>
-            )}
-          </div>
-        )}
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setIsAccountantEditing(false)}
+                className="secondary-button"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="detail-amount">
+              <p className="text-xs text-muted-foreground">{cat?.name || 'Expense'}</p>
+              <Amount value={Number(expense.amount)} large />
+            </div>
 
-        {/* Accountant review actions */}
-        {accountant && expense.status === 'Submitted' && (
-          <div>
-            {queryInput ? (
-              <div className="space-y-2">
-                <textarea
-                  placeholder={getTranslation(lang, 'queryQuestionPlaceholder')}
-                  value={questionText}
-                  onChange={(e) => setQuestionText(e.target.value)}
-                  className="w-full rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-xs"
-                  rows={3}
-                />
-                <div className="flex gap-2">
-                  <button onClick={handleSendQuery} disabled={submitting} className="primary-button flex-1 !min-h-[36px]">
-                    {getTranslation(lang, 'sendQuery')}
-                  </button>
-                  <button onClick={() => setQueryInput(false)} className="secondary-button !min-h-[36px]">
-                    {getTranslation(lang, 'cancel')}
-                  </button>
-                </div>
+            <div className="detail-grid">
+              <div>
+                <span className="text-muted-foreground">Date</span>
+                <strong>{formatDate(expense.date)}</strong>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Status</span>
+                <StatusBadge status={expense.status} />
+              </div>
+            </div>
+
+            {expense.note && (
+              <div className="note-box">
+                <span className="text-xs text-muted-foreground block mb-1">Note / Work</span>
+                <p className="text-sm font-medium">{expense.note}</p>
+              </div>
+            )}
+
+            {/* Bill Image View */}
+            {signedPhotoUrl ? (
+              <div className="overflow-hidden rounded-2xl border border-[#d9dfd9] dark:border-[#2e4235]">
+                <a href={signedPhotoUrl} target="_blank" rel="noopener noreferrer">
+                  <img src={signedPhotoUrl} alt="Bill full view" className="max-h-64 w-full object-cover" />
+                </a>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={handleApprove} disabled={submitting} className="primary-button">
-                  <Check className="size-4" />
-                  {getTranslation(lang, 'approve')}
+              <div className="bill-large">
+                <ImageIcon className="size-6 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">No bill image attached</span>
+              </div>
+            )}
+
+            {/* Query Message Box */}
+            {expense.query_message && (
+              <div className="query-box">
+                <p className="text-xs font-bold uppercase tracking-wide text-[#9b6a10]">
+                  {getTranslation(lang, 'accountantQuestion')}
+                </p>
+                <p className="mt-1 text-sm">{expense.query_message}</p>
+              </div>
+            )}
+
+            {/* Locked badge for supervisors */}
+            {isLocked && (
+              <div className="flex items-center justify-center gap-2 rounded-xl bg-[#eef1ee] dark:bg-[#1a2d22] p-2 text-xs font-semibold text-[#68736b] dark:text-[#7a8e80]">
+                <Lock className="size-3.5" />
+                <span>Entry verified and locked (cannot be edited)</span>
+              </div>
+            )}
+
+            {/* Accountant Management Actions (Edit & Delete) */}
+            {isAccountant && (
+              <div className="flex gap-2 pt-2 border-t border-[#edf0eb] dark:border-[#27372d]">
+                <button
+                  type="button"
+                  onClick={() => setIsAccountantEditing(true)}
+                  className="primary-button flex-1 !min-h-[36px] text-xs justify-center"
+                >
+                  Edit Entry
                 </button>
-                <button onClick={() => setQueryInput(true)} className="secondary-button">
-                  {getTranslation(lang, 'query')}
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={handleAccountantDelete}
+                  className="secondary-button !border-destructive/40 text-destructive hover:bg-destructive/10 !px-3 !min-h-[36px] text-xs"
+                  title="Delete Entry"
+                >
+                  Delete
                 </button>
               </div>
             )}
-          </div>
+
+            {/* Supervisor resubmit edit mode */}
+            {profile.role === 'supervisor' && expense.status === 'Query' && (
+              <div>
+                {isResubmitting ? (
+                  <div className="space-y-3 pt-2">
+                    <label>
+                      <span>Amount</span>
+                      <input
+                        type="number"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>Note</span>
+                      <input
+                        value={editNote}
+                        onChange={(e) => setEditNote(e.target.value)}
+                      />
+                    </label>
+                    <button onClick={handleResubmit} disabled={submitting} className="primary-button w-full">
+                      {getTranslation(lang, 'submit')}
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setIsResubmitting(true)} className="primary-button w-full">
+                    {getTranslation(lang, 'editResubmit')}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Accountant review actions */}
+            {accountant && expense.status === 'Submitted' && (
+              <div>
+                {queryInput ? (
+                  <div className="space-y-2">
+                    <textarea
+                      placeholder={getTranslation(lang, 'queryQuestionPlaceholder')}
+                      value={questionText}
+                      onChange={(e) => setQuestionText(e.target.value)}
+                      className="w-full rounded-xl border border-[#d9dfd9] dark:border-[#2e4235] p-2 text-xs"
+                      rows={3}
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={handleSendQuery} disabled={submitting} className="primary-button flex-1 !min-h-[36px]">
+                        {getTranslation(lang, 'sendQuery')}
+                      </button>
+                      <button onClick={() => setQueryInput(false)} className="secondary-button !min-h-[36px]">
+                        {getTranslation(lang, 'cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={handleApprove} disabled={submitting} className="primary-button">
+                      <Check className="size-4" />
+                      {getTranslation(lang, 'approve')}
+                    </button>
+                    <button onClick={() => setQueryInput(true)} className="secondary-button">
+                      {getTranslation(lang, 'query')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </Modal>

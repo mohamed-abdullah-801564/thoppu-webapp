@@ -38,11 +38,19 @@ export function normalizeExcelDate(val: any): string {
 
   const str = String(val).trim()
 
-  // Match DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY
+  // Match DD.MM.YYYY or DD/MM/YYYY or DD-MM-YYYY (4-digit year)
   const dmyMatch = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/)
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+
+  // Match DD.MM.YY or DD/MM/YY or DD-MM-YY (2-digit year)
+  const dmyShortMatch = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2})$/)
+  if (dmyShortMatch) {
+    const [, d, m, y] = dmyShortMatch
+    const fullYear = parseInt(y, 10) < 50 ? `20${y}` : `19${y}`
+    return `${fullYear}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
   }
 
   // Match YYYY-MM-DD
@@ -189,7 +197,7 @@ export async function parseExcelFile(file: File, categories: Category[]): Promis
 }
 
 /**
- * Export running ledger to genuine .xlsx Excel workbook file
+ * Export running ledger to genuine .xlsx Excel workbook file (5 Columns: Date, Particular, Expense, Income, Balance)
  */
 export function exportToExcel(
   rows: Array<{
@@ -197,7 +205,6 @@ export function exportToExcel(
     particular: string
     expense: number
     income?: number
-    deposit?: number
     balance: number
   }>,
   openingBalance: number,
@@ -206,8 +213,8 @@ export function exportToExcel(
   const wb = XLSX.utils.book_new()
 
   const excelData = [
-    ['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance'],
-    [new Date().toISOString().slice(0, 10), 'Opening Balance', '', '', '', openingBalance],
+    ['Date', 'Particular', 'Expense', 'Income', 'Balance'],
+    [new Date().toISOString().slice(0, 10), 'Opening Balance', '', '', openingBalance],
   ]
 
   for (const r of rows) {
@@ -216,7 +223,6 @@ export function exportToExcel(
       r.particular,
       r.expense > 0 ? (r.expense as any) : '',
       r.income && r.income > 0 ? (r.income as any) : '',
-      r.deposit && r.deposit > 0 ? (r.deposit as any) : '',
       r.balance as any,
     ])
   }
@@ -224,29 +230,26 @@ export function exportToExcel(
   // Append summary row
   const totalExpense = rows.reduce((s, r) => s + (Number(r.expense) || 0), 0)
   const totalIncome = rows.reduce((s, r) => s + (Number(r.income) || 0), 0)
-  const totalDeposit = rows.reduce((s, r) => s + (Number(r.deposit) || 0), 0)
   const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance
 
-  excelData.push(['', '', '', '', '', ''])
+  excelData.push(['', '', '', '', ''])
   excelData.push([
     'TOTAL',
     'Net Period Summary',
     totalExpense > 0 ? (totalExpense as any) : '',
     totalIncome > 0 ? (totalIncome as any) : '',
-    totalDeposit > 0 ? (totalDeposit as any) : '',
     closingBalance as any,
   ])
 
   const ws = XLSX.utils.aoa_to_sheet(excelData)
 
-  // Auto-width columns for 6 columns
+  // Auto-width columns for 5 columns
   ws['!cols'] = [
     { wch: 14 },
-    { wch: 32 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 14 },
+    { wch: 36 },
     { wch: 16 },
+    { wch: 16 },
+    { wch: 18 },
   ]
 
   XLSX.utils.book_append_sheet(wb, ws, 'Ledger')
@@ -254,7 +257,7 @@ export function exportToExcel(
 }
 
 /**
- * Export running ledger to professionally styled PDF document
+ * Export running ledger to professionally styled PDF document (5 Columns: Date, Particular, Expense, Income, Balance)
  */
 export function exportToPdf(
   rows: Array<{
@@ -262,7 +265,6 @@ export function exportToPdf(
     particular: string
     expense: number
     income?: number
-    deposit?: number
     balance: number
   }>,
   openingBalance: number,
@@ -284,14 +286,12 @@ export function exportToPdf(
   // Calculations for summary
   const totalExpense = rows.reduce((s, r) => s + (Number(r.expense) || 0), 0)
   const totalIncome = rows.reduce((s, r) => s + (Number(r.income) || 0), 0)
-  const totalDeposit = rows.reduce((s, r) => s + (Number(r.deposit) || 0), 0)
   const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance
 
   const tableData: any[][] = [
     [
       new Date().toISOString().slice(0, 10),
       'Opening Starting Balance',
-      '-',
       '-',
       '-',
       `Rs. ${Number(openingBalance).toLocaleString('en-IN')}`,
@@ -304,7 +304,6 @@ export function exportToPdf(
       r.particular,
       r.expense > 0 ? `Rs. ${Number(r.expense).toLocaleString('en-IN')}` : '-',
       r.income && r.income > 0 ? `Rs. ${Number(r.income).toLocaleString('en-IN')}` : '-',
-      r.deposit && r.deposit > 0 ? `Rs. ${Number(r.deposit).toLocaleString('en-IN')}` : '-',
       `Rs. ${Number(r.balance).toLocaleString('en-IN')}`,
     ])
   }
@@ -315,13 +314,12 @@ export function exportToPdf(
     'Net Period Summary',
     `Rs. ${totalExpense.toLocaleString('en-IN')}`,
     totalIncome > 0 ? `Rs. ${totalIncome.toLocaleString('en-IN')}` : '-',
-    `Rs. ${totalDeposit.toLocaleString('en-IN')}`,
     `Rs. ${Number(closingBalance).toLocaleString('en-IN')}`,
   ])
 
   autoTable(doc, {
     startY: 36,
-    head: [['Date', 'Particular', 'Expense', 'Income', 'Deposit', 'Balance']],
+    head: [['Date', 'Particular', 'Expense', 'Income', 'Balance']],
     body: tableData,
     headStyles: {
       fillColor: [31, 95, 70],
@@ -340,10 +338,9 @@ export function exportToPdf(
     columnStyles: {
       0: { cellWidth: 26 },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 26, halign: 'right' },
-      3: { cellWidth: 24, halign: 'right' },
-      4: { cellWidth: 26, halign: 'right' },
-      5: { cellWidth: 28, halign: 'right' },
+      2: { cellWidth: 32, halign: 'right' },
+      3: { cellWidth: 32, halign: 'right' },
+      4: { cellWidth: 34, halign: 'right' },
     },
   })
 
