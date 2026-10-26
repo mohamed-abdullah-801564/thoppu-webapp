@@ -3431,6 +3431,13 @@ function ExpenseDetailModal({
   const [editAmount, setEditAmount] = useState(expense.amount.toString())
   const [editNote, setEditNote] = useState(expense.note || '')
 
+  // Bill photo state for edit mode (accountant & resubmit)
+  const [editFile, setEditFile] = useState<File | null>(null)
+  const [editPreviewUrl, setEditPreviewUrl] = useState<string | null>(null)
+  const [removePhoto, setRemovePhoto] = useState(false)
+  const [compressing, setCompressing] = useState(false)
+  const editFileInputRef = useRef<HTMLInputElement>(null)
+
   const cat = categories.find((c) => c.id === (isAccountantEditing ? accCategoryId : expense.category_id))
 
   useEffect(() => {
@@ -3438,8 +3445,21 @@ function ExpenseDetailModal({
       getSignedBillUrl(expense.bill_photo_url).then((url) => {
         setSignedPhotoUrl(url)
       })
+    } else {
+      setSignedPhotoUrl(null)
     }
-  }, [expense.bill_photo_url])
+    setEditFile(null)
+    setEditPreviewUrl(null)
+    setRemovePhoto(false)
+  }, [expense.bill_photo_url, expense.id])
+
+  const handleEditFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0]
+    if (!selected) return
+    setEditFile(selected)
+    setEditPreviewUrl(URL.createObjectURL(selected))
+    setRemovePhoto(false)
+  }
 
   // Approve expense (turns to Verified and locks it permanently)
   const handleApprove = async () => {
@@ -3486,7 +3506,17 @@ function ExpenseDetailModal({
       return
     }
     setSubmitting(true)
+    let photoPath = expense.bill_photo_url
+
     try {
+      if (editFile) {
+        setCompressing(true)
+        photoPath = await uploadBillPhoto(editFile, DEFAULT_PROPERTY_ID)
+        setCompressing(false)
+      } else if (removePhoto) {
+        photoPath = null
+      }
+
       const { error } = await supabase
         .from('expenses')
         .update({
@@ -3494,6 +3524,7 @@ function ExpenseDetailModal({
           category_id: accCategoryId,
           note: accNote.trim() || null,
           amount: num,
+          bill_photo_url: photoPath,
         })
         .eq('id', expense.id)
 
@@ -3510,6 +3541,7 @@ function ExpenseDetailModal({
       alert(`Error updating expense: ${err.message}`)
     } finally {
       setSubmitting(false)
+      setCompressing(false)
     }
   }
 
@@ -3539,12 +3571,23 @@ function ExpenseDetailModal({
     const num = parseFloat(editAmount)
     if (isNaN(num) || num <= 0) return
     setSubmitting(true)
+    let photoPath = expense.bill_photo_url
+
     try {
+      if (editFile) {
+        setCompressing(true)
+        photoPath = await uploadBillPhoto(editFile, DEFAULT_PROPERTY_ID)
+        setCompressing(false)
+      } else if (removePhoto) {
+        photoPath = null
+      }
+
       const { error } = await supabase
         .from('expenses')
         .update({
           amount: num,
           note: editNote.trim() || null,
+          bill_photo_url: photoPath,
           status: 'Submitted',
         })
         .eq('id', expense.id)
@@ -3555,6 +3598,7 @@ function ExpenseDetailModal({
       alert(`Resubmit error: ${err.message}`)
     } finally {
       setSubmitting(false)
+      setCompressing(false)
     }
   }
 
@@ -3610,14 +3654,106 @@ function ExpenseDetailModal({
               />
             </label>
 
+            {/* Bill Photo Upload / Change / Remove */}
+            <div>
+              <p className="mb-2 text-sm font-semibold">{getTranslation(lang, 'billPhoto')}</p>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={editFileInputRef}
+                onChange={handleEditFileChange}
+                className="hidden"
+              />
+
+              {editPreviewUrl ? (
+                <div className="relative overflow-hidden rounded-xl border border-[#d9dfd9] dark:border-[#2e4235]">
+                  <img src={editPreviewUrl} alt="Bill preview" className="max-h-48 w-full object-cover" />
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => editFileInputRef.current?.click()}
+                      className="rounded-lg bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-black/80 flex items-center gap-1 backdrop-blur-sm"
+                    >
+                      <Camera className="size-3.5" />
+                      <span>{lang === 'ta' ? 'மாற்று' : 'Change'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditFile(null)
+                        setEditPreviewUrl(null)
+                        if (editFileInputRef.current) editFileInputRef.current.value = ''
+                      }}
+                      className="rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                      title="Remove"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : !removePhoto && signedPhotoUrl ? (
+                <div className="relative overflow-hidden rounded-xl border border-[#d9dfd9] dark:border-[#2e4235]">
+                  <img src={signedPhotoUrl} alt="Existing bill" className="max-h-48 w-full object-cover" />
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => editFileInputRef.current?.click()}
+                      className="rounded-lg bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-black/80 flex items-center gap-1 backdrop-blur-sm"
+                    >
+                      <Camera className="size-3.5" />
+                      <span>{lang === 'ta' ? 'மாற்று' : 'Change'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRemovePhoto(true)}
+                      className="rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                      title="Remove photo"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => editFileInputRef.current?.click()}
+                    className="upload-box w-full"
+                  >
+                    <Camera className="size-5 text-[#1f5f46] dark:text-[#35b586]" />
+                    <span>{getTranslation(lang, 'takePicture')} / Upload Bill</span>
+                    <Upload className="size-4 text-muted-foreground" />
+                  </button>
+                  {removePhoto && signedPhotoUrl && (
+                    <div className="flex items-center justify-between text-xs text-muted-foreground px-1 pt-1">
+                      <span>Photo will be removed on save</span>
+                      <button
+                        type="button"
+                        onClick={() => setRemovePhoto(false)}
+                        className="text-[#1f5f46] dark:text-[#35b586] hover:underline font-semibold"
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-2 pt-2">
-              <button type="submit" disabled={submitting} className="primary-button flex-1">
-                {submitting ? 'Saving...' : 'Save Changes'}
+              <button type="submit" disabled={submitting || compressing} className="primary-button flex-1">
+                {compressing ? getTranslation(lang, 'compressingImage') : submitting ? 'Saving...' : 'Save Changes'}
               </button>
               <button
                 type="button"
-                disabled={submitting}
-                onClick={() => setIsAccountantEditing(false)}
+                disabled={submitting || compressing}
+                onClick={() => {
+                  setIsAccountantEditing(false)
+                  setEditFile(null)
+                  setEditPreviewUrl(null)
+                  setRemovePhoto(false)
+                }}
                 className="secondary-button"
               >
                 Cancel
@@ -3686,7 +3822,16 @@ function ExpenseDetailModal({
               <div className="flex gap-2 pt-2 border-t border-[#edf0eb] dark:border-[#27372d]">
                 <button
                   type="button"
-                  onClick={() => setIsAccountantEditing(true)}
+                  onClick={() => {
+                    setAccDate(expense.date)
+                    setAccCategoryId(expense.category_id)
+                    setAccNote(expense.note || '')
+                    setAccAmount(expense.amount.toString())
+                    setEditFile(null)
+                    setEditPreviewUrl(null)
+                    setRemovePhoto(false)
+                    setIsAccountantEditing(true)
+                  }}
                   className="primary-button flex-1 !min-h-[36px] text-xs justify-center"
                 >
                   Edit Entry
@@ -3723,12 +3868,76 @@ function ExpenseDetailModal({
                         onChange={(e) => setEditNote(e.target.value)}
                       />
                     </label>
-                    <button onClick={handleResubmit} disabled={submitting} className="primary-button w-full">
-                      {getTranslation(lang, 'submit')}
-                    </button>
+
+                    {/* Resubmit Photo */}
+                    <div>
+                      <p className="mb-2 text-sm font-semibold">{getTranslation(lang, 'billPhoto')}</p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        ref={editFileInputRef}
+                        onChange={handleEditFileChange}
+                        className="hidden"
+                      />
+                      {editPreviewUrl ? (
+                        <div className="relative overflow-hidden rounded-xl border border-[#d9dfd9] dark:border-[#2e4235]">
+                          <img src={editPreviewUrl} alt="Bill preview" className="max-h-48 w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditFile(null)
+                              setEditPreviewUrl(null)
+                              if (editFileInputRef.current) editFileInputRef.current.value = ''
+                            }}
+                            className="absolute top-2 right-2 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => editFileInputRef.current?.click()}
+                          className="upload-box w-full"
+                        >
+                          <Camera className="size-5 text-[#1f5f46] dark:text-[#35b586]" />
+                          <span>{getTranslation(lang, 'takePicture')} / Upload Bill</span>
+                          <Upload className="size-4 text-muted-foreground" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button onClick={handleResubmit} disabled={submitting || compressing} className="primary-button flex-1">
+                        {compressing ? getTranslation(lang, 'compressingImage') : submitting ? getTranslation(lang, 'submitting') : getTranslation(lang, 'submit')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsResubmitting(false)
+                          setEditFile(null)
+                          setEditPreviewUrl(null)
+                          setRemovePhoto(false)
+                        }}
+                        className="secondary-button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <button onClick={() => setIsResubmitting(true)} className="primary-button w-full">
+                  <button
+                    onClick={() => {
+                      setEditAmount(expense.amount.toString())
+                      setEditNote(expense.note || '')
+                      setEditFile(null)
+                      setEditPreviewUrl(null)
+                      setRemovePhoto(false)
+                      setIsResubmitting(true)
+                    }}
+                    className="primary-button w-full"
+                  >
                     {getTranslation(lang, 'editResubmit')}
                   </button>
                 )}
